@@ -4,6 +4,8 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>재고 · 영업관리 CRM</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css" rel="stylesheet" />
 <link rel="stylesheet" href="css/style.css" />
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="js/supabaseClient.js"></script>
@@ -11,28 +13,27 @@
 </head>
 <body>
 <div class="page">
-  <h1 class="page-title">재고 현황</h1>
-  <p class="page-sub">업로드된 재고자산명세서 스냅샷을 기준일별로 조회합니다.</p>
+  <div class="page-header">
+    <div>
+      <div class="page-kick">WONTECH FEED · INVENTORY</div>
+      <div class="page-title"><i class="bi bi-archive"></i>재고 현황</div>
+    </div>
+    <div class="page-sub" id="summary-label"></div>
+  </div>
+  <p class="hint" style="margin:-10px 0 16px">업로드된 재고자산명세서 스냅샷을 기준일별로 조회합니다. 행을 클릭하면 최근 출고 속도 기준 소진 예상일을 볼 수 있습니다.</p>
 
-  <div class="form-row">
-    <div class="field">
-      <label>기준일</label>
-      <select id="snapshot-select" style="width:160px"></select>
-    </div>
-    <div class="field">
-      <label>검색 (품목명 / 코드)</label>
-      <input id="search" placeholder="예: 라이신" style="width:220px" />
-    </div>
+  <div class="wt-tools">
+    <span class="pl" style="font-size:12px;font-weight:600;color:#374151">기준일</span>
+    <select id="snapshot-select" style="width:150px"></select>
+    <span class="pl" style="font-size:12px;font-weight:600;color:#374151;margin-left:8px">검색</span>
+    <input id="search" placeholder="품목명 또는 코드" style="width:200px" />
     <button id="search-btn" class="primary">검색</button>
-    <span class="hint" id="summary-label"></span>
   </div>
 
   <div class="panel">
     <div class="table-wrap">
-      <table>
-        <thead>
-          <tr><th>품목코드</th><th>품목명</th><th>규격</th><th class="num">재고수량</th><th class="num">재고단가</th><th class="num">재고금액</th></tr>
-        </thead>
+      <table class="wt-tbl">
+        <thead><tr><th class="rk"></th><th class="l">품목명</th><th class="l">규격</th><th>재고수량</th><th>재고단가</th><th>재고금액</th></tr></thead>
         <tbody id="inv-body"><tr><td colspan="6" class="empty-state">불러오는 중...</td></tr></tbody>
       </table>
     </div>
@@ -41,13 +42,12 @@
 
 <script>
 let snapshotDates = [];
+let CURRENT_ROWS = [];
 let keyword = "";
+let PENDING_CODE = null;
 
 async function loadSnapshotDates() {
-  const { data, error } = await sb
-    .from("inventory_snapshots")
-    .select("snapshot_date")
-    .order("snapshot_date", { ascending: false });
+  const { data, error } = await sb.from("inventory_snapshots").select("snapshot_date").order("snapshot_date", { ascending: false });
   if (error || !data || !data.length) return [];
   return [...new Set(data.map((r) => r.snapshot_date))];
 }
@@ -56,50 +56,74 @@ async function loadInventory(date) {
   const body = document.getElementById("inv-body");
   body.innerHTML = '<tr><td colspan="6" class="empty-state">불러오는 중...</td></tr>';
 
-  let query = sb.from("inventory_snapshots").select("*").eq("snapshot_date", date);
-  if (keyword) query = query.or(`product_name.ilike.%${keyword}%,product_code.ilike.%${keyword}%`);
-  query = query.order("amount", { ascending: false });
+  const { data, error } = await sb.from("inventory_snapshots").select("*").eq("snapshot_date", date).order("amount", { ascending: false });
+  if (error) { body.innerHTML = `<tr><td colspan="6" class="empty-state">오류: ${error.message}</td></tr>`; return; }
+  CURRENT_ROWS = data || [];
+  renderTable();
 
-  const { data, error } = await query;
-  if (error) {
-    body.innerHTML = `<tr><td colspan="6" class="empty-state">오류: ${error.message}</td></tr>`;
-    return;
+  if (PENDING_CODE) {
+    document.getElementById("search").value = PENDING_CODE;
+    keyword = PENDING_CODE;
+    PENDING_CODE = null;
+    renderTable();
   }
-  if (!data || !data.length) {
-    body.innerHTML = '<tr><td colspan="6" class="empty-state">데이터가 없습니다.</td></tr>';
+}
+
+function renderTable() {
+  let rows = CURRENT_ROWS;
+  if (keyword) {
+    const kw = keyword.toLowerCase();
+    rows = rows.filter((r) => (r.product_name || "").toLowerCase().includes(kw) || (r.product_code || "").toLowerCase().includes(kw));
+  }
+  if (!rows.length) {
+    document.getElementById("inv-body").innerHTML = '<tr><td colspan="6" class="empty-state">데이터가 없습니다.</td></tr>';
     document.getElementById("summary-label").textContent = "";
     return;
   }
-
-  const totalAmount = data.reduce((a, r) => a + (Number(r.amount) || 0), 0);
-  document.getElementById("summary-label").textContent = `${fmtNum(data.length)}개 품목 · 총 재고금액 ${fmtNum(totalAmount)}`;
-
-  body.innerHTML = data.map((r) => `
-    <tr>
-      <td>${r.product_code || "-"}</td>
-      <td>${r.product_name || "-"}</td>
-      <td>${r.spec || "-"}</td>
-      <td class="num">${fmtNum(r.qty)}</td>
-      <td class="num">${fmtNum(r.unit_price)}</td>
-      <td class="num">${fmtNum(r.amount)}</td>
-    </tr>
-  `).join("");
+  const totalAmount = rows.reduce((a, r) => a + (Number(r.amount) || 0), 0);
+  document.getElementById("summary-label").textContent = `${fmtNum(rows.length)}개 품목 · 총 재고금액 ${fmtWon(totalAmount)}`;
+  document.getElementById("inv-body").innerHTML = rows.map((r, i) => `
+    <tr class="clk" onclick='openDetail(${JSON.stringify(r.product_code)})'>
+      <td class="rk">${i + 1}</td>
+      <td class="l nm">${esc(r.product_name || "-")}</td>
+      <td class="l tx2">${esc(r.spec || "-")}</td>
+      <td>${fmtNum(r.qty)}</td>
+      <td>${fmtNum(r.unit_price)}</td>
+      <td>${fmtNum(r.amount)}</td>
+    </tr>`).join("");
 }
 
-document.getElementById("snapshot-select").addEventListener("change", (e) => {
-  loadInventory(e.target.value);
-});
-document.getElementById("search-btn").addEventListener("click", () => {
-  keyword = document.getElementById("search").value.trim();
-  loadInventory(document.getElementById("snapshot-select").value);
-});
-document.getElementById("search").addEventListener("keydown", (e) => {
-  if (e.key === "Enter") document.getElementById("search-btn").click();
-});
+async function openDetail(code) {
+  const row = CURRENT_ROWS.find((r) => r.product_code === code);
+  if (!row) return;
+  const cutoff = new Date(row.snapshot_date); cutoff.setDate(cutoff.getDate() - 29);
+  const { data: recent } = await sb.from("profit_daily").select("qty,profit_date").eq("product_code", code).gte("profit_date", cutoff.toISOString().slice(0, 10));
+  const totalQty = (recent || []).reduce((a, r) => a + (Number(r.qty) || 0), 0);
+  const avgDaily = totalQty / 30;
+  const daysLeft = avgDaily > 0 ? (Number(row.qty) || 0) / avgDaily : null;
+
+  const body = `
+    <div class="tile-row">
+      <div class="tile"><div class="l">현재 재고</div><div class="v">${fmtNum(row.qty)}</div></div>
+      <div class="tile"><div class="l">재고금액</div><div class="v">${fmtWon(row.amount)}</div></div>
+      <div class="tile"><div class="l">최근 30일 평균 출고</div><div class="v">${fmtNum(Math.round(avgDaily))}/일</div></div>
+      <div class="tile"><div class="l">예상 소진일</div><div class="v" style="color:${daysLeft !== null && daysLeft < 14 ? "var(--red)" : "var(--ink)"}">${daysLeft === null ? "-" : Math.floor(daysLeft) + "일"}</div></div>
+    </div>
+    <div class="hint">기준일 ${row.snapshot_date} · 최근 30일(${cutoff.toISOString().slice(0,10)} ~ ${row.snapshot_date}) 출고수량 기준 추정치입니다.</div>
+    <div style="margin-top:14px"><a href="products.html?code=${encodeURIComponent(code)}" class="btn"><i class="bi bi-box-seam"></i> 품목 상세 실적 보기</a></div>
+  `;
+  openModal(`<i class="bi bi-archive"></i> ${esc(row.product_name)} <span style="font-size:12px;color:var(--mut);font-weight:500">${esc(row.spec || "")}</span>`, body);
+}
+
+document.getElementById("snapshot-select").addEventListener("change", (e) => loadInventory(e.target.value));
+document.getElementById("search-btn").addEventListener("click", () => { keyword = document.getElementById("search").value.trim(); renderTable(); });
+document.getElementById("search").addEventListener("keydown", (e) => { if (e.key === "Enter") document.getElementById("search-btn").click(); });
 
 (async function () {
   const session = await requireAuth("inventory");
   if (!session) return;
+
+  PENDING_CODE = new URLSearchParams(location.search).get("code");
 
   snapshotDates = await loadSnapshotDates();
   const select = document.getElementById("snapshot-select");

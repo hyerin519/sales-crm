@@ -4,6 +4,8 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>판매일보 · 영업관리 CRM</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css" rel="stylesheet" />
 <link rel="stylesheet" href="css/style.css" />
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="js/supabaseClient.js"></script>
@@ -11,26 +13,29 @@
 </head>
 <body>
 <div class="page">
-  <h1 class="page-title">판매일보</h1>
-  <p class="page-sub">기간·거래처·품목 조건으로 판매 거래 내역을 조회합니다.</p>
+  <div class="page-header">
+    <div>
+      <div class="page-kick">WONTECH FEED · SALES LEDGER</div>
+      <div class="page-title"><i class="bi bi-receipt"></i>판매일보</div>
+    </div>
+    <div class="page-sub" id="count-label"></div>
+  </div>
 
-  <div class="form-row">
-    <div class="field"><label>시작일</label><input id="f-start" type="date" /></div>
-    <div class="field"><label>종료일</label><input id="f-end" type="date" /></div>
+  <div class="wt-tools" id="period-host"></div>
+  <div class="wt-tools">
     <div class="field"><label>거래처명</label><input id="f-customer" style="width:160px" /></div>
     <div class="field"><label>품목명</label><input id="f-product" style="width:160px" /></div>
     <button id="search-btn" class="primary">조회</button>
     <button id="reset-btn">초기화</button>
-    <span class="hint" id="count-label"></span>
   </div>
 
   <div class="panel">
     <div class="table-wrap">
-      <table>
+      <table class="wt-tbl">
         <thead>
           <tr>
-            <th>일자</th><th>문서번호</th><th>거래처</th><th>품목</th><th>규격</th>
-            <th class="num">수량</th><th class="num">단가</th><th class="num">합계금액</th><th>창고</th><th>완료</th>
+            <th class="l">일자</th><th class="l">문서번호</th><th class="l">거래처</th><th class="l">품목</th><th class="l">규격</th>
+            <th>수량</th><th>단가</th><th>합계금액</th><th class="l">창고</th><th class="l">완료</th>
           </tr>
         </thead>
         <tbody id="sales-body"><tr><td colspan="10" class="empty-state">불러오는 중...</td></tr></tbody>
@@ -47,15 +52,15 @@
 <script>
 const PAGE_SIZE = 50;
 let page = 0;
+let PERIOD = null;
 
 function buildQuery() {
   let q = sb.from("sales").select("*", { count: "exact" });
-  const start = document.getElementById("f-start").value;
-  const end = document.getElementById("f-end").value;
+  const p = PERIOD.get();
+  const { from, to } = periodToDates(p);
+  q = q.gte("sale_date", from).lte("sale_date", to);
   const cust = document.getElementById("f-customer").value.trim();
   const prod = document.getElementById("f-product").value.trim();
-  if (start) q = q.gte("sale_date", start);
-  if (end) q = q.lte("sale_date", end);
   if (cust) q = q.ilike("customer_name", `%${cust}%`);
   if (prod) q = q.ilike("product_name", `%${prod}%`);
   return q.order("sale_date", { ascending: false }).order("id", { ascending: false });
@@ -66,10 +71,7 @@ async function loadSales() {
   body.innerHTML = '<tr><td colspan="10" class="empty-state">불러오는 중...</td></tr>';
 
   const { data, count, error } = await buildQuery().range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE - 1);
-  if (error) {
-    body.innerHTML = `<tr><td colspan="10" class="empty-state">오류: ${error.message}</td></tr>`;
-    return;
-  }
+  if (error) { body.innerHTML = `<tr><td colspan="10" class="empty-state">오류: ${error.message}</td></tr>`; return; }
   if (!data || !data.length) {
     body.innerHTML = '<tr><td colspan="10" class="empty-state">데이터가 없습니다.</td></tr>';
     document.getElementById("count-label").textContent = "";
@@ -80,25 +82,48 @@ async function loadSales() {
   document.getElementById("page-label").textContent = `${page + 1} / ${Math.max(1, Math.ceil(count / PAGE_SIZE))} 페이지`;
 
   body.innerHTML = data.map((r) => `
-    <tr>
-      <td>${r.sale_date}</td>
-      <td>${r.doc_no || "-"}</td>
-      <td>${r.customer_name || "-"}</td>
-      <td>${r.product_name || "-"}</td>
-      <td>${r.spec || "-"}</td>
-      <td class="num">${fmtNum(r.qty)}</td>
-      <td class="num">${fmtNum(r.unit_price)}</td>
-      <td class="num">${fmtNum(r.total_amount)}</td>
-      <td>${r.warehouse || "-"}</td>
-      <td>${r.complete_yn === "완료" ? '<span class="badge ok">완료</span>' : `<span class="badge no">${r.complete_yn || "-"}</span>`}</td>
-    </tr>
-  `).join("");
+    <tr class="clk" onclick='openDetail(${JSON.stringify(r.doc_no)}, ${JSON.stringify(r.row_key)})'>
+      <td class="l">${r.sale_date}</td>
+      <td class="l">${esc(r.doc_no || "-")}</td>
+      <td class="l">${esc(r.customer_name || "-")}</td>
+      <td class="l">${esc(r.product_name || "-")}</td>
+      <td class="l">${esc(r.spec || "-")}</td>
+      <td>${fmtNum(r.qty)}</td>
+      <td>${fmtNum(r.unit_price)}</td>
+      <td>${fmtNum(r.total_amount)}</td>
+      <td class="l">${esc(r.warehouse || "-")}</td>
+      <td class="l">${r.complete_yn === "완료" ? '<span class="badge-st ok">완료</span>' : `<span class="badge-st mut">${esc(r.complete_yn || "-")}</span>`}</td>
+    </tr>`).join("");
+}
+
+async function openDetail(docNo, rowKey) {
+  const { data: siblings } = await sb.from("sales").select("*").eq("doc_no", docNo).order("id");
+  const rows = siblings || [];
+  const cur = rows.find((r) => r.row_key === rowKey) || rows[0];
+  if (!cur) return;
+
+  const drow = (k, v) => `<div class="drow"><span class="k">${k}</span><span class="v">${v}</span></div>`;
+  const body = `
+    <div class="dsec">거래 정보</div>
+    ${drow("일자", cur.sale_date)}
+    ${drow("거래처", `<a href="customers.html?code=${encodeURIComponent(cur.customer_code || "")}">${esc(cur.customer_name || "-")}</a>`)}
+    ${drow("품목", `<a href="products.html?code=${encodeURIComponent(cur.product_code || "")}">${esc(cur.product_name || "-")}</a> ${esc(cur.spec || "")}`)}
+    ${drow("수량 / 단가", `${fmtNum(cur.qty)} / ${fmtNum(cur.unit_price)}`)}
+    ${drow("공급가액 / 부가세", `${fmtNum(cur.supply_amount)} / ${fmtNum(cur.vat)}`)}
+    ${drow("합계금액", `<b>${fmtNum(cur.total_amount)}</b>`)}
+    ${drow("창고", cur.warehouse || "-")}
+    ${drow("유형 / 완료여부", `${esc(cur.sale_type || "-")} / ${esc(cur.complete_yn || "-")}`)}
+    ${drow("비고", esc(cur.note || "-"))}
+    ${rows.length > 1 ? `<div class="dsec">같은 문서(${esc(docNo)})의 다른 품목 (${rows.length - 1}건)</div>` +
+      `<div class="table-wrap"><table class="wt-tbl"><thead><tr><th class="l">품목</th><th>수량</th><th>합계금액</th></tr></thead><tbody>` +
+      rows.filter((r) => r.row_key !== cur.row_key).map((r) => `<tr><td class="l">${esc(r.product_name || "-")}</td><td>${fmtNum(r.qty)}</td><td>${fmtNum(r.total_amount)}</td></tr>`).join("") +
+      `</tbody></table></div>` : ""}
+  `;
+  openModal(`<i class="bi bi-receipt"></i> 문서 ${esc(docNo)}`, body);
 }
 
 document.getElementById("search-btn").addEventListener("click", () => { page = 0; loadSales(); });
 document.getElementById("reset-btn").addEventListener("click", () => {
-  document.getElementById("f-start").value = "";
-  document.getElementById("f-end").value = "";
   document.getElementById("f-customer").value = "";
   document.getElementById("f-product").value = "";
   page = 0;
@@ -110,6 +135,22 @@ document.getElementById("next-btn").addEventListener("click", () => { page++; lo
 (async function () {
   const session = await requireAuth("sales");
   if (!session) return;
+
+  const { data: latestRows } = await sb.from("sales").select("sale_date").order("sale_date", { ascending: false }).limit(1);
+  const { data: earliestRows } = await sb.from("sales").select("sale_date").order("sale_date", { ascending: true }).limit(1);
+  if (!latestRows || !latestRows.length) {
+    document.getElementById("period-host").innerHTML = '<span class="mut">업로드된 데이터가 없습니다.</span>';
+    document.getElementById("sales-body").innerHTML = '<tr><td colspan="10" class="empty-state">데이터가 없습니다.</td></tr>';
+    return;
+  }
+  const latest = new Date(latestRows[0].sale_date);
+  const earliest = new Date(earliestRows[0].sale_date);
+
+  PERIOD = createPeriodCtrl(document.getElementById("period-host"), {
+    minYear: earliest.getFullYear(), maxYear: latest.getFullYear(), maxMonth: latest.getMonth() + 1,
+    onChange: () => { page = 0; loadSales(); },
+  });
+
   loadSales();
 })();
 </script>

@@ -4,172 +4,179 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>거래처 · 영업관리 CRM</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css" rel="stylesheet" />
 <link rel="stylesheet" href="css/style.css" />
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
 <script src="js/supabaseClient.js"></script>
 <script src="js/auth-guard.js"></script>
 </head>
 <body>
 <div class="page">
-  <h1 class="page-title">거래처 관리</h1>
-  <p class="page-sub">판매일보 기준으로 자동 생성된 거래처 목록입니다. 담당자·연락처는 직접 입력해서 보완하세요.</p>
-
-  <div class="form-row">
-    <div class="field">
-      <label>검색 (거래처명 / 코드)</label>
-      <input id="search" placeholder="예: 한국썸벧" style="width:240px" />
+  <div class="page-header">
+    <div>
+      <div class="page-kick">WONTECH FEED · CUSTOMERS</div>
+      <div class="page-title"><i class="bi bi-building"></i>거래처</div>
     </div>
+    <div class="page-sub" id="count-label"></div>
+  </div>
+  <p class="hint" style="margin:-10px 0 16px">판매일보 기준 자동 생성된 거래처 목록입니다 (누적 매출액 = 공급가액 기준). 담당자·연락처는 직접 입력해서 보완하세요. 행을 클릭하면 상세 실적과 거래 내역을 볼 수 있습니다.</p>
+
+  <div class="wt-tools">
+    <span class="pl" style="font-size:12px;font-weight:600;color:#374151">검색</span>
+    <input id="search" placeholder="거래처명 또는 코드" style="width:240px" />
     <button id="search-btn" class="primary">검색</button>
-    <span class="hint" id="count-label"></span>
   </div>
 
-  <div style="display:flex; gap:16px; align-items:flex-start;">
-    <div class="panel" style="flex:1; min-width:0;">
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>거래처코드</th><th>거래처명</th><th>담당자</th><th>연락처</th><th class="num">거래건수</th></tr></thead>
-          <tbody id="cust-body"><tr><td colspan="5" class="empty-state">불러오는 중...</td></tr></tbody>
-        </table>
-      </div>
-      <div class="pager">
-        <button id="prev-btn">이전</button>
-        <span id="page-label">1 페이지</span>
-        <button id="next-btn">다음</button>
-      </div>
-    </div>
-
-    <div class="panel" id="detail-panel" style="width:360px; display:none;">
-      <div style="font-weight:700; margin-bottom:10px;" id="detail-title">거래처 상세</div>
-      <input type="hidden" id="detail-code" />
-      <div class="field" style="margin-bottom:10px;"><label>담당자</label><input id="detail-manager" /></div>
-      <div class="field" style="margin-bottom:10px;"><label>연락처</label><input id="detail-phone" /></div>
-      <div class="field" style="margin-bottom:10px;"><label>이메일</label><input id="detail-email" /></div>
-      <div class="field" style="margin-bottom:10px;"><label>주소</label><input id="detail-address" /></div>
-      <div class="field" style="margin-bottom:10px;"><label>메모</label><textarea id="detail-memo" rows="3"></textarea></div>
-      <button id="save-detail-btn" class="primary">저장</button>
-      <span class="hint" id="save-status"></span>
-
-      <div style="margin-top:18px; font-weight:700; font-size:13px;">최근 거래 내역</div>
-      <div class="table-wrap" style="margin-top:8px;">
-        <table>
-          <thead><tr><th>일자</th><th>품목</th><th class="num">금액</th></tr></thead>
-          <tbody id="recent-sales-body"></tbody>
-        </table>
-      </div>
+  <div class="panel">
+    <div class="table-wrap">
+      <table class="wt-tbl">
+        <thead><tr><th class="rk"></th><th class="l">거래처명</th><th class="l">담당자</th><th class="l">연락처</th><th>거래건수</th><th>최근거래일</th><th>누적매출액</th></tr></thead>
+        <tbody id="cust-body"><tr><td colspan="7" class="empty-state">불러오는 중...</td></tr></tbody>
+      </table>
     </div>
   </div>
 </div>
 
 <script>
-const PAGE_SIZE = 30;
-let page = 0;
+let ALL_SALES = [];
 let keyword = "";
 
-async function loadCustomers() {
-  const body = document.getElementById("cust-body");
-  body.innerHTML = '<tr><td colspan="5" class="empty-state">불러오는 중...</td></tr>';
-
-  let query = sb.from("customers").select("code, name, manager, phone", { count: "exact" });
-  if (keyword) query = query.or(`name.ilike.%${keyword}%,code.ilike.%${keyword}%`);
-  query = query.order("name").range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE - 1);
-
-  const { data, count, error } = await query;
-  if (error) {
-    body.innerHTML = `<tr><td colspan="5" class="empty-state">오류: ${error.message}</td></tr>`;
-    return;
-  }
-  if (!data || !data.length) {
-    body.innerHTML = '<tr><td colspan="5" class="empty-state">거래처가 없습니다.</td></tr>';
-    document.getElementById("count-label").textContent = "";
-    return;
-  }
-
-  document.getElementById("count-label").textContent = `총 ${fmtNum(count)}개`;
-  document.getElementById("page-label").textContent = `${page + 1} 페이지`;
-
-  const codes = data.map((c) => c.code);
-  const { data: salesCountRows } = await sb.from("sales").select("customer_code").in("customer_code", codes);
-  const countMap = {};
-  for (const r of salesCountRows || []) countMap[r.customer_code] = (countMap[r.customer_code] || 0) + 1;
-
-  body.innerHTML = data.map((c) => `
-    <tr class="cust-row" data-code="${c.code}" style="cursor:pointer;">
-      <td>${c.code}</td>
-      <td>${c.name}</td>
-      <td>${c.manager || '<span class="muted">-</span>'}</td>
-      <td>${c.phone || '<span class="muted">-</span>'}</td>
-      <td class="num">${fmtNum(countMap[c.code] || 0)}</td>
-    </tr>
-  `).join("");
-
-  document.querySelectorAll(".cust-row").forEach((row) => {
-    row.addEventListener("click", () => openDetail(row.dataset.code));
-  });
+async function loadAll() {
+  const [{ data: customers }, sales] = await Promise.all([
+    sb.from("customers").select("*"),
+    fetchAllRows((from, to) => sb.from("sales").select("customer_code,customer_name,sale_date,product_code,product_name,spec,qty,unit_price,supply_amount,total_amount").range(from, to)),
+  ]);
+  ALL_SALES = sales;
+  return customers || [];
 }
+
+function renderTable(customers) {
+  const body = document.getElementById("cust-body");
+  const agg = {};
+  for (const r of ALL_SALES) {
+    const key = r.customer_code;
+    if (!key) continue;
+    if (!agg[key]) agg[key] = { count: 0, amount: 0, last: null };
+    agg[key].count++;
+    agg[key].amount += Number(r.supply_amount) || 0;
+    const d = new Date(r.sale_date);
+    if (!agg[key].last || d > agg[key].last) agg[key].last = d;
+  }
+
+  let rows = customers.map((c) => ({ ...c, ...(agg[c.code] || { count: 0, amount: 0, last: null }) }));
+  if (keyword) {
+    const kw = keyword.toLowerCase();
+    rows = rows.filter((c) => (c.name || "").toLowerCase().includes(kw) || (c.code || "").toLowerCase().includes(kw));
+  }
+  rows.sort((a, b) => b.amount - a.amount);
+
+  document.getElementById("count-label").textContent = `총 ${fmtNum(rows.length)}개 거래처`;
+
+  body.innerHTML = rows.length
+    ? rows.map((c, i) => `
+      <tr class="clk" onclick="openDetail('${esc(c.code)}')">
+        <td class="rk">${i + 1}</td>
+        <td class="l nm">${esc(c.name)}</td>
+        <td class="l">${c.manager ? esc(c.manager) : '<span class="mut">-</span>'}</td>
+        <td class="l">${c.phone ? esc(c.phone) : '<span class="mut">-</span>'}</td>
+        <td>${fmtNum(c.count)}</td>
+        <td>${c.last ? c.last.toISOString().slice(0, 10) : "-"}</td>
+        <td>${fmtWon(c.amount)}</td>
+      </tr>`).join("")
+    : '<tr><td colspan="7" class="empty-state">조건에 맞는 거래처가 없습니다.</td></tr>';
+}
+
+let CUSTOMERS = [];
+let detailChart = null;
 
 async function openDetail(code) {
   const { data: cust, error } = await sb.from("customers").select("*").eq("code", code).single();
   if (error || !cust) return;
 
-  document.getElementById("detail-panel").style.display = "block";
-  document.getElementById("detail-title").textContent = `${cust.name} (${cust.code})`;
-  document.getElementById("detail-code").value = cust.code;
-  document.getElementById("detail-manager").value = cust.manager || "";
-  document.getElementById("detail-phone").value = cust.phone || "";
-  document.getElementById("detail-email").value = cust.email || "";
-  document.getElementById("detail-address").value = cust.address || "";
-  document.getElementById("detail-memo").value = cust.memo || "";
-  document.getElementById("save-status").textContent = "";
+  const txns = ALL_SALES.filter((r) => r.customer_code === code).sort((a, b) => new Date(b.sale_date) - new Date(a.sale_date));
+  const totalAmount = txns.reduce((a, r) => a + (Number(r.supply_amount) || 0), 0);
+  const last12Cut = new Date(); last12Cut.setMonth(last12Cut.getMonth() - 12);
+  const recentAmount = txns.filter((r) => new Date(r.sale_date) >= last12Cut).reduce((a, r) => a + (Number(r.supply_amount) || 0), 0);
 
-  const { data: recent } = await sb
-    .from("sales")
-    .select("sale_date, product_name, total_amount")
-    .eq("customer_code", code)
-    .order("sale_date", { ascending: false })
-    .limit(15);
+  const byMonth = {};
+  for (const r of txns) {
+    const m = r.sale_date.slice(0, 7);
+    byMonth[m] = (byMonth[m] || 0) + (Number(r.supply_amount) || 0);
+  }
+  const months = Object.keys(byMonth).sort().slice(-12);
 
-  const rbody = document.getElementById("recent-sales-body");
-  rbody.innerHTML = (recent && recent.length)
-    ? recent.map((r) => `<tr><td>${r.sale_date}</td><td>${r.product_name || "-"}</td><td class="num">${fmtNum(r.total_amount)}</td></tr>`).join("")
-    : '<tr><td colspan="3" class="empty-state">거래 내역이 없습니다.</td></tr>';
+  const body = `
+    <div class="tile-row">
+      <div class="tile"><div class="l">누적 매출액</div><div class="v">${fmtWon(totalAmount)}</div></div>
+      <div class="tile"><div class="l">거래 건수</div><div class="v">${fmtNum(txns.length)}건</div></div>
+      <div class="tile"><div class="l">최근 12개월</div><div class="v">${fmtWon(recentAmount)}</div></div>
+      <div class="tile"><div class="l">최근 거래일</div><div class="v" style="font-size:14px">${txns.length ? txns[0].sale_date : "-"}</div></div>
+    </div>
+    <div class="dsec">월별 매출 추이 (최근 12개월)</div>
+    <div style="height:120px"><canvas id="cust-trend-chart"></canvas></div>
+
+    <div class="dsec">담당자·연락처</div>
+    <div class="wt-grid g-2">
+      <div class="field"><label>담당자</label><input id="d-manager" value="${esc(cust.manager || "")}" /></div>
+      <div class="field"><label>연락처</label><input id="d-phone" value="${esc(cust.phone || "")}" /></div>
+      <div class="field"><label>이메일</label><input id="d-email" value="${esc(cust.email || "")}" /></div>
+      <div class="field"><label>주소</label><input id="d-address" value="${esc(cust.address || "")}" /></div>
+    </div>
+    <div class="field" style="margin-top:10px"><label>메모</label><textarea id="d-memo" rows="2">${esc(cust.memo || "")}</textarea></div>
+    <div style="margin-top:10px;display:flex;align-items:center;gap:10px">
+      <button class="primary" onclick="saveDetail('${esc(code)}')">저장</button><span class="hint" id="save-status" style="margin:0"></span>
+    </div>
+
+    <div class="dsec">최근 거래 내역 (최근 20건)</div>
+    <div class="table-wrap"><table class="wt-tbl">
+      <thead><tr><th class="l">일자</th><th class="l">품목</th><th class="l">규격</th><th>수량</th><th>공급가액</th></tr></thead>
+      <tbody>${txns.slice(0, 20).map((t) => `<tr><td class="l">${t.sale_date}</td><td class="l">${esc(t.product_name || "-")}</td><td class="l">${esc(t.spec || "-")}</td><td>${fmtNum(t.qty)}</td><td>${fmtNum(t.supply_amount)}</td></tr>`).join("") || '<tr><td colspan="5" class="empty-state">거래 내역이 없습니다.</td></tr>'}</tbody>
+    </table></div>
+  `;
+  openModal(`<i class="bi bi-building"></i> ${esc(cust.name)} <span style="font-size:12px;color:var(--mut);font-weight:500">${esc(cust.code)}</span>`, body, true);
+
+  if (detailChart) detailChart.destroy();
+  detailChart = new Chart(document.getElementById("cust-trend-chart"), {
+    type: "bar",
+    data: { labels: months.map((m) => m.slice(2)), datasets: [{ data: months.map((m) => byMonth[m]), backgroundColor: "#2563eb" }] },
+    options: { maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { ticks: { callback: (v) => fmtWon(v) } } } },
+  });
 }
 
-document.getElementById("save-detail-btn").addEventListener("click", async () => {
-  const code = document.getElementById("detail-code").value;
+async function saveDetail(code) {
   const payload = {
-    manager: document.getElementById("detail-manager").value.trim() || null,
-    phone: document.getElementById("detail-phone").value.trim() || null,
-    email: document.getElementById("detail-email").value.trim() || null,
-    address: document.getElementById("detail-address").value.trim() || null,
-    memo: document.getElementById("detail-memo").value.trim() || null,
+    manager: document.getElementById("d-manager").value.trim() || null,
+    phone: document.getElementById("d-phone").value.trim() || null,
+    email: document.getElementById("d-email").value.trim() || null,
+    address: document.getElementById("d-address").value.trim() || null,
+    memo: document.getElementById("d-memo").value.trim() || null,
     updated_at: new Date().toISOString(),
   };
   const statusEl = document.getElementById("save-status");
   statusEl.textContent = "저장 중...";
   const { error } = await sb.from("customers").update(payload).eq("code", code);
   statusEl.textContent = error ? `실패: ${error.message}` : "저장됨";
-  if (!error) loadCustomers();
-});
+  if (!error) renderTable(CUSTOMERS);
+}
 
 document.getElementById("search-btn").addEventListener("click", () => {
   keyword = document.getElementById("search").value.trim();
-  page = 0;
-  loadCustomers();
+  renderTable(CUSTOMERS);
 });
 document.getElementById("search").addEventListener("keydown", (e) => {
   if (e.key === "Enter") document.getElementById("search-btn").click();
-});
-document.getElementById("prev-btn").addEventListener("click", () => {
-  if (page > 0) { page--; loadCustomers(); }
-});
-document.getElementById("next-btn").addEventListener("click", () => {
-  page++; loadCustomers();
 });
 
 (async function () {
   const session = await requireAuth("customers");
   if (!session) return;
-  loadCustomers();
+  CUSTOMERS = await loadAll();
+  renderTable(CUSTOMERS);
+
+  const code = new URLSearchParams(location.search).get("code");
+  if (code) openDetail(code);
 })();
 </script>
 </body>

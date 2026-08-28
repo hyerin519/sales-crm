@@ -4,6 +4,8 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>데이터 업로드 · 영업관리 CRM</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css" rel="stylesheet" />
 <link rel="stylesheet" href="css/style.css" />
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
@@ -12,12 +14,17 @@
 </head>
 <body>
 <div class="page">
-  <h1 class="page-title">데이터 업로드</h1>
-  <p class="page-sub">더존 ERP에서 내려받은 엑셀을 업로드하면 자동으로 반영됩니다. 같은 기간을 다시 올려도 중복 없이 갱신됩니다.</p>
+  <div class="page-header">
+    <div>
+      <div class="page-kick">WONTECH FEED · UPLOAD</div>
+      <div class="page-title"><i class="bi bi-cloud-upload"></i>데이터 업로드</div>
+    </div>
+  </div>
+  <p class="hint" style="margin:-10px 0 16px">더존 ERP에서 내려받은 엑셀을 업로드하면 자동으로 반영됩니다. 같은 기간을 다시 올려도 중복 없이 갱신됩니다.</p>
 
   <div class="upload-grid">
     <div class="upload-box">
-      <h3>판매일(월)보</h3>
+      <h3><i class="bi bi-receipt"></i>판매일(월)보</h3>
       <div class="desc">일자·품목·거래처·금액이 담긴 판매 거래 상세 엑셀. 거래처/품목 목록도 이 파일에서 자동 갱신됩니다.</div>
       <input type="file" id="file-sales" accept=".xlsx,.xls" />
       <button id="upload-sales-btn" class="primary" style="margin-top:10px;">업로드</button>
@@ -25,7 +32,7 @@
     </div>
 
     <div class="upload-box">
-      <h3>재고자산명세서</h3>
+      <h3><i class="bi bi-archive"></i>재고자산명세서</h3>
       <div class="desc">특정 시점 재고 스냅샷 엑셀. 기준일을 지정하면 해당 날짜의 기존 데이터를 덮어씁니다.</div>
       <div class="field" style="margin-bottom:10px;"><label>기준일</label><input type="date" id="inv-date" /></div>
       <input type="file" id="file-inventory" accept=".xlsx,.xls" />
@@ -34,7 +41,7 @@
     </div>
 
     <div class="upload-box">
-      <h3>매출이익현황</h3>
+      <h3><i class="bi bi-graph-up-arrow"></i>매출이익현황</h3>
       <div class="desc">일자·품목별 매출/원가/이익 집계 엑셀.</div>
       <input type="file" id="file-profit" accept=".xlsx,.xls" />
       <button id="upload-profit-btn" class="primary" style="margin-top:10px;">업로드</button>

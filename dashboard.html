@@ -3,7 +3,9 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>대시보드 · 영업관리 CRM</title>
+<title>종합 · 영업관리 CRM</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css" rel="stylesheet" />
 <link rel="stylesheet" href="css/style.css" />
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
@@ -12,144 +14,342 @@
 </head>
 <body>
 <div class="page">
-  <h1 class="page-title">대시보드</h1>
-  <p class="page-sub" id="period-label">불러오는 중...</p>
+  <div class="page-header">
+    <div>
+      <div class="page-kick">WONTECH FEED · SALES OVERVIEW</div>
+      <div class="page-title"><i class="bi bi-bar-chart-line"></i>종합 매출현황</div>
+    </div>
+    <div class="page-sub" id="asof-label">불러오는 중...</div>
+  </div>
 
-  <div class="kpi-grid" id="kpi-grid">
-    <div class="kpi-card"><div class="label">매출</div><div class="value" id="kpi-sales">-</div></div>
-    <div class="kpi-card"><div class="label">매출원가</div><div class="value" id="kpi-cost">-</div></div>
-    <div class="kpi-card"><div class="label">매출총이익</div><div class="value" id="kpi-profit">-</div></div>
-    <div class="kpi-card"><div class="label">이익률</div><div class="value" id="kpi-rate">-</div></div>
-    <div class="kpi-card"><div class="label">활성 거래처 수</div><div class="value" id="kpi-customers">-</div></div>
+  <div class="wt-tools" id="period-host"></div>
+
+  <div class="sb" id="kpi-band" style="display:none">
+    <div class="sb-head"><span class="sb-title"><i class="bi bi-lightning-charge-fill me-1"></i>선택 기간 실적</span><span class="sb-note" id="sb-note"></span></div>
+    <div class="sb-grid" id="sb-grid"></div>
   </div>
 
   <div class="panel">
-    <div style="font-weight:700; margin-bottom:10px;">최근 30일 매출 추이</div>
+    <div class="wt-st"><i class="bi bi-graph-up-arrow"></i>월별 매출 · 매출총이익 추이<span class="hint">막대 클릭 시 해당 월 상세</span></div>
     <div class="chart-wrap"><canvas id="trend-chart"></canvas></div>
   </div>
 
-  <div class="panel">
-    <div style="font-weight:700; margin-bottom:10px;">품목별 매출 TOP 10 (선택 기간)</div>
-    <div class="table-wrap">
-      <table>
-        <thead><tr><th>품목명</th><th>규격</th><th class="num">매출액</th><th class="num">매출총이익</th><th class="num">이익률</th></tr></thead>
-        <tbody id="top-products-body"><tr><td colspan="5" class="empty-state">불러오는 중...</td></tr></tbody>
-      </table>
+  <div class="wt-grid g-3" id="action-cards">
+    <div class="panel">
+      <div class="wt-st"><i class="bi bi-exclamation-triangle" style="color:var(--red)"></i>이탈 위험 거래처<span class="hint">45일+ 거래 없음</span></div>
+      <ul class="act-list" id="act-churn"><li class="empty-state">불러오는 중...</li></ul>
     </div>
+    <div class="panel">
+      <div class="wt-st"><i class="bi bi-box-seam" style="color:var(--amber)"></i>재고 소진 임박<span class="hint">현재 재고 기준 14일 이내</span></div>
+      <ul class="act-list" id="act-stock"><li class="empty-state">불러오는 중...</li></ul>
+    </div>
+    <div class="panel">
+      <div class="wt-st"><i class="bi bi-graph-down-arrow" style="color:var(--red)"></i>마진 악화 품목<span class="hint">전월 대비 이익률 하락</span></div>
+      <ul class="act-list" id="act-margin"><li class="empty-state">불러오는 중...</li></ul>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="wt-st"><i class="bi bi-trophy"></i>품목별 매출 TOP 10 (선택 기간)<span class="hint">클릭 시 품목 상세</span></div>
+    <div id="top-products"><div class="empty-state">불러오는 중...</div></div>
   </div>
 </div>
 
 <script>
+let ALL_PROFIT = [];   // profit_daily 전체 캐시
+let ALL_SALES = [];    // sales 전체 캐시 (customer_code, customer_name, sale_date, total_amount, product_code)
+let LATEST_INV = [];   // 최신 재고 스냅샷
+let LATEST_DATE = null; // 데이터상 최신일 (Date)
+let PERIOD = null;
+
+function toKey(dateStr) { const d = new Date(dateStr); return d.getFullYear() * 100 + (d.getMonth() + 1); }
+function inPeriod(dateStr, p) { if (!dateStr) return false; const k = toKey(dateStr); return k >= p.sy * 100 + p.sm && k <= p.ey * 100 + p.em; }
+function shiftYear(p, n) { return { sy: p.sy + n, sm: p.sm, ey: p.ey + n, em: p.em }; }
+function daysBetween(a, b) { return Math.round((a - b) / 86400000); }
+
+function rankListHtml(rows, accentColor, linkFn) {
+  if (!rows.length) return '<div class="empty-state">데이터가 없습니다.</div>';
+  const mx = rows[0].v || 1;
+  return rows.map((r) => `
+    <a class="rank-item" style="display:block;text-decoration:none;color:inherit" href="${linkFn(r)}">
+      <div class="rank-row"><span class="rn">${esc(r.name)}${r.sub ? ' <span class="mut">' + esc(r.sub) + '</span>' : ""}</span><span class="rv">${fmtWon(r.v)}</span></div>
+      <div class="rank-bar"><i style="width:${(r.v / mx * 100).toFixed(1)}%;background:${accentColor}"></i></div>
+    </a>`).join("");
+}
+
+function renderKpiBand() {
+  const p = PERIOD.get();
+  const rows = ALL_PROFIT.filter((r) => inPeriod(r.profit_date, p));
+  const sales = rows.reduce((a, r) => a + (Number(r.sales_amount) || 0), 0);
+  const cost = rows.reduce((a, r) => a + (Number(r.cost_amount) || 0), 0);
+  const profit = rows.reduce((a, r) => a + (Number(r.profit_amount) || 0), 0);
+  const rate = sales ? (profit / sales) * 100 : 0;
+
+  const prevP = shiftYear(p, -1);
+  const prevRows = ALL_PROFIT.filter((r) => inPeriod(r.profit_date, prevP));
+  const prevSales = prevRows.reduce((a, r) => a + (Number(r.sales_amount) || 0), 0);
+  const prevProfit = prevRows.reduce((a, r) => a + (Number(r.profit_amount) || 0), 0);
+  const salesYoy = prevSales ? (sales / prevSales - 1) * 100 : null;
+  const profitYoy = prevProfit ? (profit / prevProfit - 1) * 100 : null;
+  const prevRate = prevSales ? (prevProfit / prevSales) * 100 : null;
+
+  const custSet = new Set(ALL_SALES.filter((r) => inPeriod(r.sale_date, p)).map((r) => r.customer_code).filter(Boolean));
+
+  document.getElementById("sb-note").textContent = `${p.sy}.${String(p.sm).padStart(2, "0")} ~ ${p.ey}.${String(p.em).padStart(2, "0")} · 전년 동기간 대비`;
+  document.getElementById("sb-grid").innerHTML = `
+    <div class="sb-cell" onclick="openRankModal('sales')"><div class="sb-l"><i class="bi bi-cash-stack"></i>매출액 <span class="mut">›</span></div><div class="sb-v">${fmtWon(sales)}</div><div class="sb-sub">전년 ${fmtWon(prevSales)} ${yoyBadge(salesYoy)}</div></div>
+    <div class="sb-cell" onclick="openRankModal('profit')"><div class="sb-l"><i class="bi bi-piggy-bank"></i>매출총이익 <span class="mut">›</span></div><div class="sb-v">${fmtWon(profit)}</div><div class="sb-sub">전년 ${fmtWon(prevProfit)} ${yoyBadge(profitYoy)}</div></div>
+    <div class="sb-cell" onclick="openRankModal('rate')"><div class="sb-l"><i class="bi bi-percent"></i>이익률 <span class="mut">›</span></div><div class="sb-v">${fmtPct(rate)}</div><div class="sb-sub">전년 ${prevRate === null ? "-" : fmtPct(prevRate)}</div></div>
+    <div class="sb-cell" onclick="location.href='customers.html'"><div class="sb-l"><i class="bi bi-building"></i>거래 거래처 수 <span class="mut">›</span></div><div class="sb-v">${fmtNum(custSet.size)}</div><div class="sb-sub">기간 내 거래 발생</div></div>
+  `;
+  document.getElementById("kpi-band").style.display = "";
+
+  renderTopProducts(rows);
+}
+
+function openRankModal(kind) {
+  const p = PERIOD.get();
+  const rows = ALL_PROFIT.filter((r) => inPeriod(r.profit_date, p));
+  const byProduct = {};
+  for (const r of rows) {
+    const key = r.product_code || r.product_name;
+    if (!byProduct[key]) byProduct[key] = { code: r.product_code, name: r.product_name, spec: r.spec, sales: 0, cost: 0, profit: 0, qty: 0 };
+    byProduct[key].sales += Number(r.sales_amount) || 0;
+    byProduct[key].cost += Number(r.cost_amount) || 0;
+    byProduct[key].profit += Number(r.profit_amount) || 0;
+    byProduct[key].qty += Number(r.qty) || 0;
+  }
+  let list = Object.values(byProduct);
+  const titleMap = { sales: "매출액 TOP 20", profit: "매출총이익 TOP 20", rate: "이익률 낮은 품목 TOP 20" };
+  if (kind === "sales") list.sort((a, b) => b.sales - a.sales);
+  else if (kind === "profit") list.sort((a, b) => b.profit - a.profit);
+  else list = list.filter((x) => x.sales > 0).sort((a, b) => (a.profit / a.sales) - (b.profit / b.sales));
+  list = list.slice(0, 20);
+
+  const totSales = list.reduce((a, x) => a + x.sales, 0);
+  const rowsHtml = list.map((x, i) => {
+    const rate = x.sales ? (x.profit / x.sales) * 100 : 0;
+    return `<tr class="clk" onclick="location.href='products.html?code=${encodeURIComponent(x.code || "")}'"><td class="rk">${i + 1}</td><td class="l nm">${esc(x.name)}</td><td class="l tx2">${esc(x.spec || "-")}</td><td>${fmtNum(x.sales)}</td><td>${fmtNum(x.profit)}</td><td class="${rate < 0 ? "mut" : ""}">${fmtPct(rate)}</td></tr>`;
+  }).join("");
+  openModal(`<i class="bi bi-trophy"></i> ${titleMap[kind]} <span style="font-size:12px;color:var(--mut);font-weight:500">${p.sy}.${String(p.sm).padStart(2,"0")}~${p.ey}.${String(p.em).padStart(2,"0")}</span>`,
+    `<div class="table-wrap"><table class="wt-tbl"><thead><tr><th></th><th class="l">품목명</th><th class="l">규격</th><th>매출액</th><th>매출총이익</th><th>이익률</th></tr></thead><tbody>${rowsHtml || '<tr><td colspan="6" class="empty-state">데이터가 없습니다.</td></tr>'}</tbody></table></div>`, true);
+}
+
+function renderTopProducts(rows) {
+  const byProduct = {};
+  for (const r of rows) {
+    const key = r.product_code || r.product_name;
+    if (!byProduct[key]) byProduct[key] = { code: r.product_code, name: r.product_name, spec: r.spec, v: 0 };
+    byProduct[key].v += Number(r.sales_amount) || 0;
+  }
+  const top = Object.values(byProduct).sort((a, b) => b.v - a.v).slice(0, 10);
+  document.getElementById("top-products").innerHTML = rankListHtml(top, "#2563eb", (r) => `products.html?code=${encodeURIComponent(r.code || "")}`);
+}
+
+let trendChart = null;
+function renderTrendChart() {
+  const p = PERIOD.get();
+  const months = [];
+  for (let y = p.sy, m = p.sm; y < p.ey || (y === p.ey && m <= p.em); m++) {
+    if (m > 12) { m = 1; y++; }
+    months.push({ y, m });
+  }
+  const salesArr = months.map(({ y, m }) => ALL_PROFIT.filter((r) => { const k = toKey(r.profit_date); return k === y * 100 + m; }).reduce((a, r) => a + (Number(r.sales_amount) || 0), 0));
+  const profitArr = months.map(({ y, m }) => ALL_PROFIT.filter((r) => { const k = toKey(r.profit_date); return k === y * 100 + m; }).reduce((a, r) => a + (Number(r.profit_amount) || 0), 0));
+  const labels = months.map(({ y, m }) => `${String(y).slice(2)}.${String(m).padStart(2, "0")}`);
+
+  if (trendChart) trendChart.destroy();
+  trendChart = new Chart(document.getElementById("trend-chart"), {
+    type: "bar",
+    data: {
+      labels,
+      datasets: [
+        { label: "매출액", data: salesArr, backgroundColor: "#2563eb", order: 2 },
+        { label: "매출총이익", data: profitArr, type: "line", borderColor: "#15803d", backgroundColor: "#15803d", tension: 0.25, order: 1 },
+      ],
+    },
+    options: {
+      maintainAspectRatio: false,
+      scales: { y: { ticks: { callback: (v) => fmtWon(v) } } },
+      onClick: (evt, els) => {
+        if (!els.length) return;
+        const { y, m } = months[els[0].index];
+        openMonthModal(y, m);
+      },
+    },
+  });
+}
+
+function openMonthModal(y, m) {
+  const rows = ALL_PROFIT.filter((r) => toKey(r.profit_date) === y * 100 + m);
+  const sales = rows.reduce((a, r) => a + (Number(r.sales_amount) || 0), 0);
+  const profit = rows.reduce((a, r) => a + (Number(r.profit_amount) || 0), 0);
+
+  const salesRows = ALL_SALES.filter((r) => toKey(r.sale_date) === y * 100 + m);
+  const byCust = {};
+  for (const r of salesRows) {
+    const key = r.customer_code || r.customer_name;
+    if (!key) continue;
+    if (!byCust[key]) byCust[key] = { code: r.customer_code, name: r.customer_name, v: 0 };
+    byCust[key].v += Number(r.total_amount) || 0;
+  }
+  const topCust = Object.values(byCust).sort((a, b) => b.v - a.v).slice(0, 8);
+
+  const byProd = {};
+  for (const r of rows) {
+    const key = r.product_code || r.product_name;
+    if (!byProd[key]) byProd[key] = { code: r.product_code, name: r.product_name, v: 0 };
+    byProd[key].v += Number(r.sales_amount) || 0;
+  }
+  const topProd = Object.values(byProd).sort((a, b) => b.v - a.v).slice(0, 8);
+
+  const body = `
+    <div class="tile-row">
+      <div class="tile"><div class="l">매출액</div><div class="v">${fmtWon(sales)}</div></div>
+      <div class="tile"><div class="l">매출총이익</div><div class="v">${fmtWon(profit)}</div></div>
+      <div class="tile"><div class="l">이익률</div><div class="v">${sales ? fmtPct(profit / sales * 100) : "-"}</div></div>
+    </div>
+    <div class="wt-grid g-2">
+      <div><div class="dsec">거래처 TOP 8</div>${rankListHtml(topCust, "#2563eb", (r) => `customers.html?code=${encodeURIComponent(r.code || "")}`)}</div>
+      <div><div class="dsec">품목 TOP 8</div>${rankListHtml(topProd, "#15803d", (r) => `products.html?code=${encodeURIComponent(r.code || "")}`)}</div>
+    </div>`;
+  openModal(`<i class="bi bi-calendar-check"></i> ${y}년 ${m}월 매출 상세`, body, true);
+}
+
+function renderChurnRisk() {
+  if (!LATEST_DATE) return;
+  const byCust = {};
+  for (const r of ALL_SALES) {
+    const key = r.customer_code;
+    if (!key) continue;
+    if (!byCust[key]) byCust[key] = { code: key, name: r.customer_name, total: 0, last: null };
+    byCust[key].total += Number(r.total_amount) || 0;
+    const d = new Date(r.sale_date);
+    if (!byCust[key].last || d > byCust[key].last) byCust[key].last = d;
+  }
+  const list = Object.values(byCust).sort((a, b) => b.total - a.total).slice(0, 60); // 유의미한 규모의 거래처만
+  const risky = list
+    .map((c) => ({ ...c, idle: daysBetween(LATEST_DATE, c.last) }))
+    .filter((c) => c.idle >= 45)
+    .sort((a, b) => b.idle - a.idle)
+    .slice(0, 6);
+
+  document.getElementById("act-churn").innerHTML = risky.length
+    ? risky.map((c, i) => `
+      <a href="customers.html?code=${encodeURIComponent(c.code)}" style="text-decoration:none;color:inherit">
+        <li class="act-item"><span class="rk">${i + 1}</span><span><span class="nm">${esc(c.name)}</span><div class="sub">누적 ${fmtWon(c.total)}</div></span><span class="val rd">${c.idle}일째</span></li>
+      </a>`).join("")
+    : '<li class="empty-state">이탈 위험 거래처가 없습니다.</li>';
+}
+
+function renderStockAlert() {
+  if (!LATEST_INV.length) { document.getElementById("act-stock").innerHTML = '<li class="empty-state">재고 데이터가 없습니다.</li>'; return; }
+  const cutoff = new Date(LATEST_DATE); cutoff.setDate(cutoff.getDate() - 29);
+  const cutoffIso = cutoff.toISOString().slice(0, 10);
+  const recent = ALL_PROFIT.filter((r) => r.profit_date >= cutoffIso);
+  const dailyQty = {};
+  for (const r of recent) {
+    const key = r.product_code;
+    if (!key) continue;
+    dailyQty[key] = (dailyQty[key] || 0) + (Number(r.qty) || 0);
+  }
+  const alerts = LATEST_INV
+    .map((inv) => {
+      const avgDaily = (dailyQty[inv.product_code] || 0) / 30;
+      const daysLeft = avgDaily > 0 ? (Number(inv.qty) || 0) / avgDaily : null;
+      return { code: inv.product_code, name: inv.product_name, qty: inv.qty, daysLeft };
+    })
+    .filter((x) => x.daysLeft !== null && x.daysLeft < 14 && x.qty > 0)
+    .sort((a, b) => a.daysLeft - b.daysLeft)
+    .slice(0, 6);
+
+  document.getElementById("act-stock").innerHTML = alerts.length
+    ? alerts.map((x, i) => `
+      <a href="inventory.html?code=${encodeURIComponent(x.code)}" style="text-decoration:none;color:inherit">
+        <li class="act-item"><span class="rk">${i + 1}</span><span><span class="nm">${esc(x.name)}</span><div class="sub">재고 ${fmtNum(x.qty)}</div></span><span class="val am">약 ${Math.floor(x.daysLeft)}일분</span></li>
+      </a>`).join("")
+    : '<li class="empty-state">소진 임박 품목이 없습니다.</li>';
+}
+
+function renderMarginAlert() {
+  if (!LATEST_DATE) return;
+  const curM = { y: LATEST_DATE.getFullYear(), m: LATEST_DATE.getMonth() + 1 };
+  let prevM = { y: curM.y, m: curM.m - 1 };
+  if (prevM.m < 1) { prevM.m = 12; prevM.y--; }
+
+  function rateByProduct(y, m) {
+    const rows = ALL_PROFIT.filter((r) => toKey(r.profit_date) === y * 100 + m);
+    const agg = {};
+    for (const r of rows) {
+      const key = r.product_code;
+      if (!key) continue;
+      if (!agg[key]) agg[key] = { name: r.product_name, sales: 0, profit: 0 };
+      agg[key].sales += Number(r.sales_amount) || 0;
+      agg[key].profit += Number(r.profit_amount) || 0;
+    }
+    return agg;
+  }
+  const cur = rateByProduct(curM.y, curM.m);
+  const prev = rateByProduct(prevM.y, prevM.m);
+  const deltas = Object.keys(cur)
+    .filter((k) => prev[k] && cur[k].sales > 0 && prev[k].sales > 0)
+    .map((k) => {
+      const curRate = cur[k].profit / cur[k].sales * 100;
+      const prevRate = prev[k].profit / prev[k].sales * 100;
+      return { code: k, name: cur[k].name, curRate, delta: curRate - prevRate };
+    })
+    .filter((x) => x.delta < 0)
+    .sort((a, b) => a.delta - b.delta)
+    .slice(0, 6);
+
+  document.getElementById("act-margin").innerHTML = deltas.length
+    ? deltas.map((x, i) => `
+      <a href="products.html?code=${encodeURIComponent(x.code)}" style="text-decoration:none;color:inherit">
+        <li class="act-item"><span class="rk">${i + 1}</span><span><span class="nm">${esc(x.name)}</span><div class="sub">이번달 이익률 ${fmtPct(x.curRate)}</div></span><span class="val rd">${x.delta.toFixed(1)}%p</span></li>
+      </a>`).join("")
+    : '<li class="empty-state">전월 대비 이익률이 하락한 품목이 없습니다.</li>';
+}
+
 (async function () {
   const session = await requireAuth("dashboard");
   if (!session) return;
 
-  // Find latest available date in profit_daily to anchor "current period" (backfilled history data).
-  const { data: latestRows, error: latestErr } = await sb
-    .from("profit_daily")
-    .select("profit_date")
-    .order("profit_date", { ascending: false })
-    .limit(1);
+  const [{ data: latestRows }, profitRows, salesRows, invRows] = await Promise.all([
+    sb.from("profit_daily").select("profit_date").order("profit_date", { ascending: false }).limit(1),
+    fetchAllRows((from, to) => sb.from("profit_daily").select("profit_date,product_code,product_name,spec,qty,sales_amount,cost_amount,profit_amount").range(from, to)),
+    fetchAllRows((from, to) => sb.from("sales").select("sale_date,customer_code,customer_name,product_code,total_amount").range(from, to)),
+    sb.from("inventory_snapshots").select("snapshot_date").order("snapshot_date", { ascending: false }).limit(1),
+  ]);
 
-  if (latestErr || !latestRows || !latestRows.length) {
-    document.getElementById("period-label").textContent = "표시할 데이터가 없습니다.";
-    document.getElementById("top-products-body").innerHTML = '<tr><td colspan="5" class="empty-state">데이터가 없습니다.</td></tr>';
+  if (!latestRows || !latestRows.length) {
+    document.getElementById("asof-label").textContent = "데이터가 없습니다.";
+    document.getElementById("period-host").innerHTML = '<span class="mut">업로드된 데이터가 없습니다. 데이터 업로드 메뉴에서 먼저 데이터를 올려주세요.</span>';
     return;
   }
 
-  const latest = new Date(latestRows[0].profit_date);
-  const monthStart = new Date(latest.getFullYear(), latest.getMonth(), 1);
-  const monthEnd = new Date(latest.getFullYear(), latest.getMonth() + 1, 0);
-  const monthLabel = `${latest.getFullYear()}-${String(latest.getMonth() + 1).padStart(2, "0")}`;
-  document.getElementById("period-label").textContent = `기준월: ${monthLabel} (데이터상 최신월)`;
+  ALL_PROFIT = profitRows;
+  ALL_SALES = salesRows;
+  LATEST_DATE = new Date(latestRows[0].profit_date);
+  document.getElementById("asof-label").textContent = `데이터 기준일 ${latestRows[0].profit_date}`;
 
-  const toISO = (d) => d.toISOString().slice(0, 10);
-
-  const { data: monthRows } = await sb
-    .from("profit_daily")
-    .select("profit_date, product_name, spec, sales_amount, cost_amount, profit_amount")
-    .gte("profit_date", toISO(monthStart))
-    .lte("profit_date", toISO(monthEnd));
-
-  const rows = monthRows || [];
-  const sumSales = rows.reduce((a, r) => a + (Number(r.sales_amount) || 0), 0);
-  const sumCost = rows.reduce((a, r) => a + (Number(r.cost_amount) || 0), 0);
-  const sumProfit = rows.reduce((a, r) => a + (Number(r.profit_amount) || 0), 0);
-  const rate = sumSales ? (sumProfit / sumSales) * 100 : 0;
-
-  document.getElementById("kpi-sales").textContent = fmtNum(sumSales);
-  document.getElementById("kpi-cost").textContent = fmtNum(sumCost);
-  document.getElementById("kpi-profit").textContent = fmtNum(sumProfit);
-  document.getElementById("kpi-profit").className = "value " + (sumProfit >= 0 ? "pos" : "neg");
-  document.getElementById("kpi-rate").textContent = fmtPct(rate);
-  document.getElementById("kpi-rate").className = "value " + (rate >= 0 ? "pos" : "neg");
-
-  const { data: custRows } = await sb
-    .from("sales")
-    .select("customer_code")
-    .gte("sale_date", toISO(monthStart))
-    .lte("sale_date", toISO(monthEnd));
-  const custSet = new Set((custRows || []).map((r) => r.customer_code).filter(Boolean));
-  document.getElementById("kpi-customers").textContent = fmtNum(custSet.size);
-
-  // Top 10 products by sales amount for the month
-  const byProduct = {};
-  for (const r of rows) {
-    const key = r.product_name + "|" + (r.spec || "");
-    if (!byProduct[key]) byProduct[key] = { name: r.product_name, spec: r.spec, sales: 0, profit: 0 };
-    byProduct[key].sales += Number(r.sales_amount) || 0;
-    byProduct[key].profit += Number(r.profit_amount) || 0;
-  }
-  const top = Object.values(byProduct).sort((a, b) => b.sales - a.sales).slice(0, 10);
-  const tbody = document.getElementById("top-products-body");
-  tbody.innerHTML = top.length
-    ? top.map((p) => {
-        const r = p.sales ? (p.profit / p.sales) * 100 : 0;
-        return `<tr><td>${p.name || "-"}</td><td>${p.spec || "-"}</td><td class="num">${fmtNum(p.sales)}</td><td class="num">${fmtNum(p.profit)}</td><td class="num">${fmtPct(r)}</td></tr>`;
-      }).join("")
-    : '<tr><td colspan="5" class="empty-state">데이터가 없습니다.</td></tr>';
-
-  // Last 30 days trend ending at latest date
-  const trendStart = new Date(latest);
-  trendStart.setDate(trendStart.getDate() - 29);
-  const { data: trendRows } = await sb
-    .from("profit_daily")
-    .select("profit_date, sales_amount")
-    .gte("profit_date", toISO(trendStart))
-    .lte("profit_date", toISO(latest));
-
-  const byDate = {};
-  for (const r of trendRows || []) {
-    byDate[r.profit_date] = (byDate[r.profit_date] || 0) + (Number(r.sales_amount) || 0);
-  }
-  const labels = [];
-  const values = [];
-  for (let d = new Date(trendStart); d <= latest; d.setDate(d.getDate() + 1)) {
-    const iso = toISO(d);
-    labels.push(iso.slice(5));
-    values.push(byDate[iso] || 0);
+  if (invRows.data && invRows.data.length) {
+    const { data: inv } = await sb.from("inventory_snapshots").select("*").eq("snapshot_date", invRows.data[0].snapshot_date);
+    LATEST_INV = inv || [];
   }
 
-  new Chart(document.getElementById("trend-chart"), {
-    type: "line",
-    data: {
-      labels,
-      datasets: [{
-        label: "일별 매출액",
-        data: values,
-        borderColor: "#2f6feb",
-        backgroundColor: "rgba(47,111,235,0.08)",
-        fill: true,
-        tension: 0.25,
-        pointRadius: 0,
-      }],
-    },
-    options: {
-      maintainAspectRatio: false,
-      plugins: { legend: { display: false } },
-      scales: { y: { ticks: { callback: (v) => fmtNum(v) } } },
-    },
+  const minYear = Math.min(...ALL_PROFIT.map((r) => new Date(r.profit_date).getFullYear()));
+  PERIOD = createPeriodCtrl(document.getElementById("period-host"), {
+    minYear,
+    maxYear: LATEST_DATE.getFullYear(),
+    maxMonth: LATEST_DATE.getMonth() + 1,
+    onChange: () => { renderKpiBand(); renderTrendChart(); },
   });
+
+  renderKpiBand();
+  renderTrendChart();
+  renderChurnRisk();
+  renderStockAlert();
+  renderMarginAlert();
 })();
 </script>
 </body>

@@ -4,6 +4,8 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>매출이익현황 · 영업관리 CRM</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css" rel="stylesheet" />
 <link rel="stylesheet" href="css/style.css" />
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
@@ -12,28 +14,32 @@
 </head>
 <body>
 <div class="page">
-  <h1 class="page-title">매출이익현황</h1>
-  <p class="page-sub">최근 12개월 매출/매출총이익 추이와 일자·품목별 상세 내역입니다.</p>
+  <div class="page-header">
+    <div>
+      <div class="page-kick">WONTECH FEED · PROFIT</div>
+      <div class="page-title"><i class="bi bi-graph-up-arrow"></i>매출이익현황</div>
+    </div>
+    <div class="page-sub" id="count-label"></div>
+  </div>
+
+  <div class="wt-tools" id="period-host"></div>
 
   <div class="panel">
-    <div style="font-weight:700; margin-bottom:10px;">월별 매출 / 매출총이익 (최근 12개월)</div>
+    <div class="wt-st"><i class="bi bi-bar-chart"></i>월별 매출 / 매출총이익<span class="hint">막대 클릭 시 해당 월 품목별 상세</span></div>
     <div class="chart-wrap"><canvas id="monthly-chart"></canvas></div>
   </div>
 
-  <div class="form-row">
-    <div class="field"><label>시작일</label><input id="f-start" type="date" /></div>
-    <div class="field"><label>종료일</label><input id="f-end" type="date" /></div>
+  <div class="wt-tools">
     <div class="field"><label>품목명</label><input id="f-product" style="width:180px" /></div>
     <button id="search-btn" class="primary">조회</button>
     <button id="reset-btn">초기화</button>
-    <span class="hint" id="count-label"></span>
   </div>
 
   <div class="panel">
     <div class="table-wrap">
-      <table>
+      <table class="wt-tbl">
         <thead>
-          <tr><th>일자</th><th>품목</th><th>규격</th><th class="num">출고수량</th><th class="num">매출총액</th><th class="num">매출원가</th><th class="num">매출총이익</th><th class="num">이익률</th></tr>
+          <tr><th class="l">일자</th><th class="l">품목</th><th class="l">규격</th><th>출고수량</th><th>매출총액</th><th>매출원가</th><th>매출총이익</th><th>이익률</th></tr>
         </thead>
         <tbody id="profit-body"><tr><td colspan="8" class="empty-state">불러오는 중...</td></tr></tbody>
       </table>
@@ -49,14 +55,15 @@
 <script>
 const PAGE_SIZE = 50;
 let page = 0;
+let PERIOD = null;
+let monthlyChart = null;
 
 function buildQuery() {
   let q = sb.from("profit_daily").select("*", { count: "exact" });
-  const start = document.getElementById("f-start").value;
-  const end = document.getElementById("f-end").value;
+  const p = PERIOD.get();
+  const { from, to } = periodToDates(p);
+  q = q.gte("profit_date", from).lte("profit_date", to);
   const prod = document.getElementById("f-product").value.trim();
-  if (start) q = q.gte("profit_date", start);
-  if (end) q = q.lte("profit_date", end);
   if (prod) q = q.ilike("product_name", `%${prod}%`);
   return q.order("profit_date", { ascending: false }).order("id", { ascending: false });
 }
@@ -66,10 +73,7 @@ async function loadTable() {
   body.innerHTML = '<tr><td colspan="8" class="empty-state">불러오는 중...</td></tr>';
 
   const { data, count, error } = await buildQuery().range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE - 1);
-  if (error) {
-    body.innerHTML = `<tr><td colspan="8" class="empty-state">오류: ${error.message}</td></tr>`;
-    return;
-  }
+  if (error) { body.innerHTML = `<tr><td colspan="8" class="empty-state">오류: ${error.message}</td></tr>`; return; }
   if (!data || !data.length) {
     body.innerHTML = '<tr><td colspan="8" class="empty-state">데이터가 없습니다.</td></tr>';
     document.getElementById("count-label").textContent = "";
@@ -81,30 +85,27 @@ async function loadTable() {
 
   body.innerHTML = data.map((r) => `
     <tr>
-      <td>${r.profit_date}</td>
-      <td>${r.product_name || "-"}</td>
-      <td>${r.spec || "-"}</td>
-      <td class="num">${fmtNum(r.qty)}</td>
-      <td class="num">${fmtNum(r.sales_amount)}</td>
-      <td class="num">${fmtNum(r.cost_amount)}</td>
-      <td class="num">${fmtNum(r.profit_amount)}</td>
-      <td class="num">${fmtPct(r.profit_rate)}</td>
-    </tr>
-  `).join("");
+      <td class="l">${r.profit_date}</td>
+      <td class="l">${esc(r.product_name || "-")}</td>
+      <td class="l">${esc(r.spec || "-")}</td>
+      <td>${fmtNum(r.qty)}</td>
+      <td>${fmtNum(r.sales_amount)}</td>
+      <td>${fmtNum(r.cost_amount)}</td>
+      <td>${fmtNum(r.profit_amount)}</td>
+      <td class="${Number(r.profit_rate) < 0 ? "mut" : ""}">${fmtPct(r.profit_rate)}</td>
+    </tr>`).join("");
 }
 
 async function loadMonthlyChart() {
-  const { data: latestRows } = await sb.from("profit_daily").select("profit_date").order("profit_date", { ascending: false }).limit(1);
-  if (!latestRows || !latestRows.length) return;
-  const latest = new Date(latestRows[0].profit_date);
-  const rangeStart = new Date(latest.getFullYear(), latest.getMonth() - 11, 1);
-  const toISO = (d) => d.toISOString().slice(0, 10);
+  const p = PERIOD.get();
+  const { from, to } = periodToDates(p);
+  const { data } = await sb.from("profit_daily").select("profit_date, sales_amount, profit_amount").gte("profit_date", from).lte("profit_date", to);
 
-  const { data } = await sb
-    .from("profit_daily")
-    .select("profit_date, sales_amount, profit_amount")
-    .gte("profit_date", toISO(rangeStart));
-
+  const months = [];
+  for (let y = p.sy, m = p.sm; y < p.ey || (y === p.ey && m <= p.em); m++) {
+    if (m > 12) { m = 1; y++; }
+    months.push(`${y}-${String(m).padStart(2, "0")}`);
+  }
   const byMonth = {};
   for (const r of data || []) {
     const m = r.profit_date.slice(0, 7);
@@ -112,35 +113,45 @@ async function loadMonthlyChart() {
     byMonth[m].sales += Number(r.sales_amount) || 0;
     byMonth[m].profit += Number(r.profit_amount) || 0;
   }
+  const sales = months.map((m) => (byMonth[m] ? byMonth[m].sales : 0));
+  const profit = months.map((m) => (byMonth[m] ? byMonth[m].profit : 0));
 
-  const labels = [];
-  for (let i = 0; i < 12; i++) {
-    const d = new Date(rangeStart.getFullYear(), rangeStart.getMonth() + i, 1);
-    labels.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
-  }
-  const sales = labels.map((m) => (byMonth[m] ? byMonth[m].sales : 0));
-  const profit = labels.map((m) => (byMonth[m] ? byMonth[m].profit : 0));
-
-  new Chart(document.getElementById("monthly-chart"), {
+  if (monthlyChart) monthlyChart.destroy();
+  monthlyChart = new Chart(document.getElementById("monthly-chart"), {
     type: "bar",
-    data: {
-      labels,
-      datasets: [
-        { label: "매출액", data: sales, backgroundColor: "#2f6feb" },
-        { label: "매출총이익", data: profit, backgroundColor: "#1f9d55" },
-      ],
-    },
+    data: { labels: months.map((m) => m.slice(2)), datasets: [
+      { label: "매출액", data: sales, backgroundColor: "#2563eb" },
+      { label: "매출총이익", data: profit, backgroundColor: "#15803d" },
+    ]},
     options: {
       maintainAspectRatio: false,
-      scales: { y: { ticks: { callback: (v) => fmtNum(v) } } },
+      scales: { y: { ticks: { callback: (v) => fmtWon(v) } } },
+      onClick: (evt, els) => { if (els.length) openMonthModal(months[els[0].index]); },
     },
   });
 }
 
+async function openMonthModal(monthStr) {
+  const { data } = await sb.from("profit_daily").select("*").gte("profit_date", monthStr + "-01").lt("profit_date", monthStr + "-32");
+  const rows = (data || []).filter((r) => r.profit_date.slice(0, 7) === monthStr);
+  const agg = {};
+  for (const r of rows) {
+    const key = r.product_code;
+    if (!agg[key]) agg[key] = { name: r.product_name, spec: r.spec, sales: 0, profit: 0 };
+    agg[key].sales += Number(r.sales_amount) || 0;
+    agg[key].profit += Number(r.profit_amount) || 0;
+  }
+  const list = Object.entries(agg).map(([code, v]) => ({ code, ...v })).sort((a, b) => b.sales - a.sales);
+  const rowsHtml = list.map((x, i) => {
+    const rate = x.sales ? (x.profit / x.sales) * 100 : 0;
+    return `<tr class="clk" onclick="location.href='products.html?code=${encodeURIComponent(x.code)}'"><td class="rk">${i + 1}</td><td class="l">${esc(x.name)}</td><td class="l tx2">${esc(x.spec || "-")}</td><td>${fmtNum(x.sales)}</td><td>${fmtNum(x.profit)}</td><td>${fmtPct(rate)}</td></tr>`;
+  }).join("");
+  openModal(`<i class="bi bi-calendar-check"></i> ${monthStr} 품목별 매출이익`,
+    `<div class="table-wrap"><table class="wt-tbl"><thead><tr><th></th><th class="l">품목</th><th class="l">규격</th><th>매출액</th><th>매출총이익</th><th>이익률</th></tr></thead><tbody>${rowsHtml || '<tr><td colspan="6" class="empty-state">데이터가 없습니다.</td></tr>'}</tbody></table></div>`, true);
+}
+
 document.getElementById("search-btn").addEventListener("click", () => { page = 0; loadTable(); });
 document.getElementById("reset-btn").addEventListener("click", () => {
-  document.getElementById("f-start").value = "";
-  document.getElementById("f-end").value = "";
   document.getElementById("f-product").value = "";
   page = 0;
   loadTable();
@@ -151,6 +162,22 @@ document.getElementById("next-btn").addEventListener("click", () => { page++; lo
 (async function () {
   const session = await requireAuth("profit");
   if (!session) return;
+
+  const { data: latestRows } = await sb.from("profit_daily").select("profit_date").order("profit_date", { ascending: false }).limit(1);
+  const { data: earliestRows } = await sb.from("profit_daily").select("profit_date").order("profit_date", { ascending: true }).limit(1);
+  if (!latestRows || !latestRows.length) {
+    document.getElementById("period-host").innerHTML = '<span class="mut">업로드된 데이터가 없습니다.</span>';
+    document.getElementById("profit-body").innerHTML = '<tr><td colspan="8" class="empty-state">데이터가 없습니다.</td></tr>';
+    return;
+  }
+  const latest = new Date(latestRows[0].profit_date);
+  const earliest = new Date(earliestRows[0].profit_date);
+
+  PERIOD = createPeriodCtrl(document.getElementById("period-host"), {
+    minYear: earliest.getFullYear(), maxYear: latest.getFullYear(), maxMonth: latest.getMonth() + 1,
+    onChange: () => { page = 0; loadTable(); loadMonthlyChart(); },
+  });
+
   loadTable();
   loadMonthlyChart();
 })();

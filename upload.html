@@ -77,6 +77,19 @@ function toStr(v) {
   return s === "" ? null : s;
 }
 
+// 판매일보에는 같은 문서번호+품목코드가 분할납품(품목비고만 다름) 등으로 여러 번 나올 수 있고,
+// 완전히 동일한 내용의 행이 여러 개 존재하기도 해서 행 내용 조합만으로도 유일하지 않을 수 있다.
+// 파일 내 등장 순서를 접미사로 붙여 동일 파일 재업로드 시에는 같은 키로 병합되게 한다.
+const salesRowKeyCounts = new Map();
+function buildSalesRowKey(f) {
+  const base = [f.doc_no, f.product_code, f.qty, f.unit_price, f.total_amount, f.customer_code, f.note]
+    .map((v) => (v === null || v === undefined ? "" : v))
+    .join("|");
+  const n = salesRowKeyCounts.get(base) || 0;
+  salesRowKeyCounts.set(base, n + 1);
+  return `${base}#${n}`;
+}
+
 async function readFirstSheetRows(file) {
   const buf = await file.arrayBuffer();
   const wb = XLSX.read(buf, { type: "array", cellDates: true });
@@ -112,6 +125,7 @@ document.getElementById("upload-sales-btn").addEventListener("click", async () =
   clearLog("log-sales");
   if (!file) { log("log-sales", "파일을 선택해주세요."); return; }
   btn.disabled = true;
+  salesRowKeyCounts.clear();
   try {
     log("log-sales", `읽는 중: ${file.name}`);
     const { headers, rows } = await readFirstSheetRows(file);
@@ -150,7 +164,7 @@ document.getElementById("upload-sales-btn").addEventListener("click", async () =
       const productCode = toStr(r[col.code]);
       if (!saleDate || !docNo || !productCode) continue;
 
-      salesRecords.push({
+      const record = {
         doc_no: docNo,
         sale_date: saleDate,
         product_code: productCode,
@@ -170,7 +184,9 @@ document.getElementById("upload-sales-btn").addEventListener("click", async () =
         sale_type: toStr(r[col.type]),
         warehouse: toStr(r[col.warehouse]),
         note: toStr(r[col.note]),
-      });
+      };
+      record.row_key = buildSalesRowKey(record);
+      salesRecords.push(record);
 
       const custCode = toStr(r[col.custCode]);
       if (custCode && !customersMap.has(custCode)) {
@@ -185,7 +201,7 @@ document.getElementById("upload-sales-btn").addEventListener("click", async () =
 
     await upsertInChunks("customers", [...customersMap.values()], "code", "log-sales");
     await upsertInChunks("products", [...productsMap.values()], "code", "log-sales");
-    await upsertInChunks("sales", salesRecords, "doc_no,product_code", "log-sales");
+    await upsertInChunks("sales", salesRecords, "row_key", "log-sales");
 
     log("log-sales", "✅ 완료");
   } catch (e) {

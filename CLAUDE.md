@@ -15,7 +15,7 @@
 - `js/auth-guard.js` — 공용 네비게이션 렌더링 + 세션 체크 + 포맷 헬퍼(`fmtNum`, `fmtPct`)
 
 ## 업로드 자연키 (재업로드 시 upsert 기준)
-- `sales`: `(doc_no, product_code)`
+- `sales`: `row_key` (doc_no+product_code+qty+unit_price+total_amount+customer_code+note 조합). 판매일보는 같은 문서번호+품목코드가 분할납품 등으로 여러 번 나올 수 있어 (doc_no, product_code)만으로는 자연키가 되지 못함 — `upload.html`의 `buildSalesRowKey()` 참고
 - `profit_daily`: `(profit_date, product_code)`
 - `inventory_snapshots`: 자연키 없음 — 업로드 시 같은 `snapshot_date`의 기존 행을 삭제 후 재삽입(스냅샷 교체 방식)
 

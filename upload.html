@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>데이터 업로드 · 영업관리 CRM</title>
+<link rel="stylesheet" href="css/style.css" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="js/supabaseClient.js"></script>
+<script src="js/auth-guard.js"></script>
+</head>
+<body>
+<div class="page">
+  <h1 class="page-title">데이터 업로드</h1>
+  <p class="page-sub">더존 ERP에서 내려받은 엑셀을 업로드하면 자동으로 반영됩니다. 같은 기간을 다시 올려도 중복 없이 갱신됩니다.</p>
+
+  <div class="upload-grid">
+    <div class="upload-box">
+      <h3>판매일(월)보</h3>
+      <div class="desc">일자·품목·거래처·금액이 담긴 판매 거래 상세 엑셀. 거래처/품목 목록도 이 파일에서 자동 갱신됩니다.</div>
+      <input type="file" id="file-sales" accept=".xlsx,.xls" />
+      <button id="upload-sales-btn" class="primary" style="margin-top:10px;">업로드</button>
+      <div class="upload-log" id="log-sales"></div>
+    </div>
+
+    <div class="upload-box">
+      <h3>재고자산명세서</h3>
+      <div class="desc">특정 시점 재고 스냅샷 엑셀. 기준일을 지정하면 해당 날짜의 기존 데이터를 덮어씁니다.</div>
+      <div class="field" style="margin-bottom:10px;"><label>기준일</label><input type="date" id="inv-date" /></div>
+      <input type="file" id="file-inventory" accept=".xlsx,.xls" />
+      <button id="upload-inventory-btn" class="primary" style="margin-top:10px;">업로드</button>
+      <div class="upload-log" id="log-inventory"></div>
+    </div>
+
+    <div class="upload-box">
+      <h3>매출이익현황</h3>
+      <div class="desc">일자·품목별 매출/원가/이익 집계 엑셀.</div>
+      <input type="file" id="file-profit" accept=".xlsx,.xls" />
+      <button id="upload-profit-btn" class="primary" style="margin-top:10px;">업로드</button>
+      <div class="upload-log" id="log-profit"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+function log(id, msg) {
+  const el = document.getElementById(id);
+  el.textContent += msg + "\n";
+  el.scrollTop = el.scrollHeight;
+}
+function clearLog(id) { document.getElementById(id).textContent = ""; }
+
+function excelValueToISODate(v) {
+  if (v === null || v === undefined || v === "") return null;
+  if (v instanceof Date) {
+    const y = v.getUTCFullYear();
+    const m = String(v.getUTCMonth() + 1).padStart(2, "0");
+    const d = String(v.getUTCDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
+  }
+  const s = String(v).trim();
+  const m = s.match(/^(\d{4})[-./](\d{1,2})[-./](\d{1,2})/);
+  if (m) return `${m[1]}-${String(m[2]).padStart(2, "0")}-${String(m[3]).padStart(2, "0")}`;
+  return s || null;
+}
+
+function toNum(v) {
+  if (v === null || v === undefined || v === "") return null;
+  const n = Number(v);
+  return Number.isNaN(n) ? null : n;
+}
+
+function toStr(v) {
+  if (v === null || v === undefined) return null;
+  const s = String(v).trim();
+  return s === "" ? null : s;
+}
+
+async function readFirstSheetRows(file) {
+  const buf = await file.arrayBuffer();
+  const wb = XLSX.read(buf, { type: "array", cellDates: true });
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
+  if (!rows.length) return { headers: [], rows: [] };
+  const headers = rows[0].map((h) => String(h).trim());
+  return { headers, rows: rows.slice(1) };
+}
+
+function colIndex(headers, name) {
+  return headers.indexOf(name);
+}
+
+async function upsertInChunks(table, records, onConflict, logId, chunkSize = 500) {
+  let done = 0;
+  for (let i = 0; i < records.length; i += chunkSize) {
+    const chunk = records.slice(i, i + chunkSize);
+    const { error } = await sb.from(table).upsert(chunk, { onConflict });
+    if (error) {
+      log(logId, `  ✗ ${table} 저장 실패 (${i}~${i + chunk.length}): ${error.message}`);
+      throw error;
+    }
+    done += chunk.length;
+    log(logId, `  ${table}: ${done}/${records.length} 저장`);
+  }
+}
+
+// ---------------- 판매일보 ----------------
+document.getElementById("upload-sales-btn").addEventListener("click", async () => {
+  const btn = document.getElementById("upload-sales-btn");
+  const file = document.getElementById("file-sales").files[0];
+  clearLog("log-sales");
+  if (!file) { log("log-sales", "파일을 선택해주세요."); return; }
+  btn.disabled = true;
+  try {
+    log("log-sales", `읽는 중: ${file.name}`);
+    const { headers, rows } = await readFirstSheetRows(file);
+    const col = {
+      date: colIndex(headers, "일자"),
+      code: colIndex(headers, "품목코드"),
+      name: colIndex(headers, "품목명"),
+      spec: colIndex(headers, "규격"),
+      due: colIndex(headers, "납기일"),
+      qty: colIndex(headers, "수량"),
+      price: colIndex(headers, "단가"),
+      supply: colIndex(headers, "공급가액"),
+      vat: colIndex(headers, "부가세"),
+      total: colIndex(headers, "합계금액"),
+      discount: colIndex(headers, "할인율"),
+      complete: colIndex(headers, "완료여부"),
+      closed: colIndex(headers, "마감여부"),
+      docNo: colIndex(headers, "문서번호"),
+      custCode: colIndex(headers, "거래처코드"),
+      custName: colIndex(headers, "거래처명"),
+      type: colIndex(headers, "유형"),
+      warehouse: colIndex(headers, "창고명"),
+      note: colIndex(headers, "품목비고"),
+    };
+    if (col.date < 0 || col.docNo < 0 || col.code < 0) {
+      throw new Error("예상된 판매일보 형식이 아닙니다 (일자/문서번호/품목코드 헤더를 찾을 수 없음).");
+    }
+
+    const salesRecords = [];
+    const customersMap = new Map();
+    const productsMap = new Map();
+
+    for (const r of rows) {
+      const saleDate = excelValueToISODate(r[col.date]);
+      const docNo = toStr(r[col.docNo]);
+      const productCode = toStr(r[col.code]);
+      if (!saleDate || !docNo || !productCode) continue;
+
+      salesRecords.push({
+        doc_no: docNo,
+        sale_date: saleDate,
+        product_code: productCode,
+        product_name: toStr(r[col.name]),
+        spec: toStr(r[col.spec]),
+        due_date: excelValueToISODate(r[col.due]),
+        qty: toNum(r[col.qty]),
+        unit_price: toNum(r[col.price]),
+        supply_amount: toNum(r[col.supply]),
+        vat: toNum(r[col.vat]),
+        total_amount: toNum(r[col.total]),
+        discount_rate: toNum(r[col.discount]),
+        complete_yn: toStr(r[col.complete]),
+        closed_yn: toStr(r[col.closed]),
+        customer_code: toStr(r[col.custCode]),
+        customer_name: toStr(r[col.custName]),
+        sale_type: toStr(r[col.type]),
+        warehouse: toStr(r[col.warehouse]),
+        note: toStr(r[col.note]),
+      });
+
+      const custCode = toStr(r[col.custCode]);
+      if (custCode && !customersMap.has(custCode)) {
+        customersMap.set(custCode, { code: custCode, name: toStr(r[col.custName]) || custCode });
+      }
+      if (productCode && !productsMap.has(productCode)) {
+        productsMap.set(productCode, { code: productCode, name: toStr(r[col.name]) || productCode, spec: toStr(r[col.spec]) });
+      }
+    }
+
+    log("log-sales", `파싱 완료: 판매 ${salesRecords.length}건, 거래처 ${customersMap.size}개, 품목 ${productsMap.size}개`);
+
+    await upsertInChunks("customers", [...customersMap.values()], "code", "log-sales");
+    await upsertInChunks("products", [...productsMap.values()], "code", "log-sales");
+    await upsertInChunks("sales", salesRecords, "doc_no,product_code", "log-sales");
+
+    log("log-sales", "✅ 완료");
+  } catch (e) {
+    log("log-sales", `오류: ${e.message}`);
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+// ---------------- 재고자산명세서 ----------------
+document.getElementById("upload-inventory-btn").addEventListener("click", async () => {
+  const btn = document.getElementById("upload-inventory-btn");
+  const file = document.getElementById("file-inventory").files[0];
+  const snapshotDate = document.getElementById("inv-date").value;
+  clearLog("log-inventory");
+  if (!file) { log("log-inventory", "파일을 선택해주세요."); return; }
+  if (!snapshotDate) { log("log-inventory", "기준일을 입력해주세요."); return; }
+  btn.disabled = true;
+  try {
+    log("log-inventory", `읽는 중: ${file.name}`);
+    const { headers, rows } = await readFirstSheetRows(file);
+    const col = {
+      supplyType: colIndex(headers, "조달구분"),
+      accountType: colIndex(headers, "품목계정"),
+      code: colIndex(headers, "품목코드"),
+      name: colIndex(headers, "품목명"),
+      spec: colIndex(headers, "규격"),
+      qty: colIndex(headers, "재고수량"),
+      price: colIndex(headers, "재고단가"),
+      amount: colIndex(headers, "재고금액"),
+    };
+    if (col.code < 0 || col.name < 0) {
+      throw new Error("예상된 재고자산명세서 형식이 아닙니다 (품목코드/품목명 헤더를 찾을 수 없음).");
+    }
+
+    const records = [];
+    for (const r of rows) {
+      const productCode = toStr(r[col.code]);
+      if (!productCode) continue;
+      records.push({
+        snapshot_date: snapshotDate,
+        supply_type: toStr(r[col.supplyType]),
+        account_type: toStr(r[col.accountType]),
+        product_code: productCode,
+        product_name: toStr(r[col.name]),
+        spec: toStr(r[col.spec]),
+        qty: toNum(r[col.qty]),
+        unit_price: toNum(r[col.price]),
+        amount: toNum(r[col.amount]),
+      });
+    }
+
+    log("log-inventory", `파싱 완료: ${records.length}건. 기존 ${snapshotDate} 스냅샷 삭제 후 재적재합니다.`);
+    const { error: delErr } = await sb.from("inventory_snapshots").delete().eq("snapshot_date", snapshotDate);
+    if (delErr) throw delErr;
+
+    for (let i = 0; i < records.length; i += 500) {
+      const chunk = records.slice(i, i + 500);
+      const { error } = await sb.from("inventory_snapshots").insert(chunk);
+      if (error) throw error;
+      log("log-inventory", `  ${Math.min(i + 500, records.length)}/${records.length} 저장`);
+    }
+
+    log("log-inventory", "✅ 완료");
+  } catch (e) {
+    log("log-inventory", `오류: ${e.message}`);
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+// ---------------- 매출이익현황 ----------------
+document.getElementById("upload-profit-btn").addEventListener("click", async () => {
+  const btn = document.getElementById("upload-profit-btn");
+  const file = document.getElementById("file-profit").files[0];
+  clearLog("log-profit");
+  if (!file) { log("log-profit", "파일을 선택해주세요."); return; }
+  btn.disabled = true;
+  try {
+    log("log-profit", `읽는 중: ${file.name}`);
+    const { headers, rows } = await readFirstSheetRows(file);
+    const col = {
+      date: colIndex(headers, "일자"),
+      accountType: colIndex(headers, "품목계정"),
+      code: colIndex(headers, "품목"),
+      name: colIndex(headers, "품목명"),
+      spec: colIndex(headers, "규격"),
+      qty: colIndex(headers, "출고수량"),
+      sales: colIndex(headers, "매출총액"),
+      cost: colIndex(headers, "매출원가"),
+      profit: colIndex(headers, "매출총이익"),
+      rate: colIndex(headers, "이익률(%)"),
+    };
+    if (col.date < 0 || col.code < 0) {
+      throw new Error("예상된 매출이익현황 형식이 아닙니다 (일자/품목 헤더를 찾을 수 없음).");
+    }
+
+    const records = [];
+    for (const r of rows) {
+      const profitDate = excelValueToISODate(r[col.date]);
+      const productCode = toStr(r[col.code]);
+      if (!profitDate || !productCode) continue;
+      records.push({
+        profit_date: profitDate,
+        account_type: toStr(r[col.accountType]),
+        product_code: productCode,
+        product_name: toStr(r[col.name]),
+        spec: toStr(r[col.spec]),
+        qty: toNum(r[col.qty]),
+        sales_amount: toNum(r[col.sales]),
+        cost_amount: toNum(r[col.cost]),
+        profit_amount: toNum(r[col.profit]),
+        profit_rate: toNum(r[col.rate]),
+      });
+    }
+
+    log("log-profit", `파싱 완료: ${records.length}건`);
+    await upsertInChunks("profit_daily", records, "profit_date,product_code", "log-profit");
+    log("log-profit", "✅ 완료");
+  } catch (e) {
+    log("log-profit", `오류: ${e.message}`);
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+(async function () {
+  const session = await requireAuth("upload");
+  if (!session) return;
+})();
+</script>
+</body>
+</html>

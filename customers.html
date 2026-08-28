@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>거래처 · 영업관리 CRM</title>
+<link rel="stylesheet" href="css/style.css" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="js/supabaseClient.js"></script>
+<script src="js/auth-guard.js"></script>
+</head>
+<body>
+<div class="page">
+  <h1 class="page-title">거래처 관리</h1>
+  <p class="page-sub">판매일보 기준으로 자동 생성된 거래처 목록입니다. 담당자·연락처는 직접 입력해서 보완하세요.</p>
+
+  <div class="form-row">
+    <div class="field">
+      <label>검색 (거래처명 / 코드)</label>
+      <input id="search" placeholder="예: 한국썸벧" style="width:240px" />
+    </div>
+    <button id="search-btn" class="primary">검색</button>
+    <span class="hint" id="count-label"></span>
+  </div>
+
+  <div style="display:flex; gap:16px; align-items:flex-start;">
+    <div class="panel" style="flex:1; min-width:0;">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>거래처코드</th><th>거래처명</th><th>담당자</th><th>연락처</th><th class="num">거래건수</th></tr></thead>
+          <tbody id="cust-body"><tr><td colspan="5" class="empty-state">불러오는 중...</td></tr></tbody>
+        </table>
+      </div>
+      <div class="pager">
+        <button id="prev-btn">이전</button>
+        <span id="page-label">1 페이지</span>
+        <button id="next-btn">다음</button>
+      </div>
+    </div>
+
+    <div class="panel" id="detail-panel" style="width:360px; display:none;">
+      <div style="font-weight:700; margin-bottom:10px;" id="detail-title">거래처 상세</div>
+      <input type="hidden" id="detail-code" />
+      <div class="field" style="margin-bottom:10px;"><label>담당자</label><input id="detail-manager" /></div>
+      <div class="field" style="margin-bottom:10px;"><label>연락처</label><input id="detail-phone" /></div>
+      <div class="field" style="margin-bottom:10px;"><label>이메일</label><input id="detail-email" /></div>
+      <div class="field" style="margin-bottom:10px;"><label>주소</label><input id="detail-address" /></div>
+      <div class="field" style="margin-bottom:10px;"><label>메모</label><textarea id="detail-memo" rows="3"></textarea></div>
+      <button id="save-detail-btn" class="primary">저장</button>
+      <span class="hint" id="save-status"></span>
+
+      <div style="margin-top:18px; font-weight:700; font-size:13px;">최근 거래 내역</div>
+      <div class="table-wrap" style="margin-top:8px;">
+        <table>
+          <thead><tr><th>일자</th><th>품목</th><th class="num">금액</th></tr></thead>
+          <tbody id="recent-sales-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const PAGE_SIZE = 30;
+let page = 0;
+let keyword = "";
+
+async function loadCustomers() {
+  const body = document.getElementById("cust-body");
+  body.innerHTML = '<tr><td colspan="5" class="empty-state">불러오는 중...</td></tr>';
+
+  let query = sb.from("customers").select("code, name, manager, phone", { count: "exact" });
+  if (keyword) query = query.or(`name.ilike.%${keyword}%,code.ilike.%${keyword}%`);
+  query = query.order("name").range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE - 1);
+
+  const { data, count, error } = await query;
+  if (error) {
+    body.innerHTML = `<tr><td colspan="5" class="empty-state">오류: ${error.message}</td></tr>`;
+    return;
+  }
+  if (!data || !data.length) {
+    body.innerHTML = '<tr><td colspan="5" class="empty-state">거래처가 없습니다.</td></tr>';
+    document.getElementById("count-label").textContent = "";
+    return;
+  }
+
+  document.getElementById("count-label").textContent = `총 ${fmtNum(count)}개`;
+  document.getElementById("page-label").textContent = `${page + 1} 페이지`;
+
+  const codes = data.map((c) => c.code);
+  const { data: salesCountRows } = await sb.from("sales").select("customer_code").in("customer_code", codes);
+  const countMap = {};
+  for (const r of salesCountRows || []) countMap[r.customer_code] = (countMap[r.customer_code] || 0) + 1;
+
+  body.innerHTML = data.map((c) => `
+    <tr class="cust-row" data-code="${c.code}" style="cursor:pointer;">
+      <td>${c.code}</td>
+      <td>${c.name}</td>
+      <td>${c.manager || '<span class="muted">-</span>'}</td>
+      <td>${c.phone || '<span class="muted">-</span>'}</td>
+      <td class="num">${fmtNum(countMap[c.code] || 0)}</td>
+    </tr>
+  `).join("");
+
+  document.querySelectorAll(".cust-row").forEach((row) => {
+    row.addEventListener("click", () => openDetail(row.dataset.code));
+  });
+}
+
+async function openDetail(code) {
+  const { data: cust, error } = await sb.from("customers").select("*").eq("code", code).single();
+  if (error || !cust) return;
+
+  document.getElementById("detail-panel").style.display = "block";
+  document.getElementById("detail-title").textContent = `${cust.name} (${cust.code})`;
+  document.getElementById("detail-code").value = cust.code;
+  document.getElementById("detail-manager").value = cust.manager || "";
+  document.getElementById("detail-phone").value = cust.phone || "";
+  document.getElementById("detail-email").value = cust.email || "";
+  document.getElementById("detail-address").value = cust.address || "";
+  document.getElementById("detail-memo").value = cust.memo || "";
+  document.getElementById("save-status").textContent = "";
+
+  const { data: recent } = await sb
+    .from("sales")
+    .select("sale_date, product_name, total_amount")
+    .eq("customer_code", code)
+    .order("sale_date", { ascending: false })
+    .limit(15);
+
+  const rbody = document.getElementById("recent-sales-body");
+  rbody.innerHTML = (recent && recent.length)
+    ? recent.map((r) => `<tr><td>${r.sale_date}</td><td>${r.product_name || "-"}</td><td class="num">${fmtNum(r.total_amount)}</td></tr>`).join("")
+    : '<tr><td colspan="3" class="empty-state">거래 내역이 없습니다.</td></tr>';
+}
+
+document.getElementById("save-detail-btn").addEventListener("click", async () => {
+  const code = document.getElementById("detail-code").value;
+  const payload = {
+    manager: document.getElementById("detail-manager").value.trim() || null,
+    phone: document.getElementById("detail-phone").value.trim() || null,
+    email: document.getElementById("detail-email").value.trim() || null,
+    address: document.getElementById("detail-address").value.trim() || null,
+    memo: document.getElementById("detail-memo").value.trim() || null,
+    updated_at: new Date().toISOString(),
+  };
+  const statusEl = document.getElementById("save-status");
+  statusEl.textContent = "저장 중...";
+  const { error } = await sb.from("customers").update(payload).eq("code", code);
+  statusEl.textContent = error ? `실패: ${error.message}` : "저장됨";
+  if (!error) loadCustomers();
+});
+
+document.getElementById("search-btn").addEventListener("click", () => {
+  keyword = document.getElementById("search").value.trim();
+  page = 0;
+  loadCustomers();
+});
+document.getElementById("search").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") document.getElementById("search-btn").click();
+});
+document.getElementById("prev-btn").addEventListener("click", () => {
+  if (page > 0) { page--; loadCustomers(); }
+});
+document.getElementById("next-btn").addEventListener("click", () => {
+  page++; loadCustomers();
+});
+
+(async function () {
+  const session = await requireAuth("customers");
+  if (!session) return;
+  loadCustomers();
+})();
+</script>
+</body>
+</html>

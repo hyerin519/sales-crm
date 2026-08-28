@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>판매일보 · 영업관리 CRM</title>
+<link rel="stylesheet" href="css/style.css" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="js/supabaseClient.js"></script>
+<script src="js/auth-guard.js"></script>
+</head>
+<body>
+<div class="page">
+  <h1 class="page-title">판매일보</h1>
+  <p class="page-sub">기간·거래처·품목 조건으로 판매 거래 내역을 조회합니다.</p>
+
+  <div class="form-row">
+    <div class="field"><label>시작일</label><input id="f-start" type="date" /></div>
+    <div class="field"><label>종료일</label><input id="f-end" type="date" /></div>
+    <div class="field"><label>거래처명</label><input id="f-customer" style="width:160px" /></div>
+    <div class="field"><label>품목명</label><input id="f-product" style="width:160px" /></div>
+    <button id="search-btn" class="primary">조회</button>
+    <button id="reset-btn">초기화</button>
+    <span class="hint" id="count-label"></span>
+  </div>
+
+  <div class="panel">
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>일자</th><th>문서번호</th><th>거래처</th><th>품목</th><th>규격</th>
+            <th class="num">수량</th><th class="num">단가</th><th class="num">합계금액</th><th>창고</th><th>완료</th>
+          </tr>
+        </thead>
+        <tbody id="sales-body"><tr><td colspan="10" class="empty-state">불러오는 중...</td></tr></tbody>
+      </table>
+    </div>
+    <div class="pager">
+      <button id="prev-btn">이전</button>
+      <span id="page-label">1 페이지</span>
+      <button id="next-btn">다음</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const PAGE_SIZE = 50;
+let page = 0;
+
+function buildQuery() {
+  let q = sb.from("sales").select("*", { count: "exact" });
+  const start = document.getElementById("f-start").value;
+  const end = document.getElementById("f-end").value;
+  const cust = document.getElementById("f-customer").value.trim();
+  const prod = document.getElementById("f-product").value.trim();
+  if (start) q = q.gte("sale_date", start);
+  if (end) q = q.lte("sale_date", end);
+  if (cust) q = q.ilike("customer_name", `%${cust}%`);
+  if (prod) q = q.ilike("product_name", `%${prod}%`);
+  return q.order("sale_date", { ascending: false }).order("id", { ascending: false });
+}
+
+async function loadSales() {
+  const body = document.getElementById("sales-body");
+  body.innerHTML = '<tr><td colspan="10" class="empty-state">불러오는 중...</td></tr>';
+
+  const { data, count, error } = await buildQuery().range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE - 1);
+  if (error) {
+    body.innerHTML = `<tr><td colspan="10" class="empty-state">오류: ${error.message}</td></tr>`;
+    return;
+  }
+  if (!data || !data.length) {
+    body.innerHTML = '<tr><td colspan="10" class="empty-state">데이터가 없습니다.</td></tr>';
+    document.getElementById("count-label").textContent = "";
+    return;
+  }
+
+  document.getElementById("count-label").textContent = `총 ${fmtNum(count)}건`;
+  document.getElementById("page-label").textContent = `${page + 1} / ${Math.max(1, Math.ceil(count / PAGE_SIZE))} 페이지`;
+
+  body.innerHTML = data.map((r) => `
+    <tr>
+      <td>${r.sale_date}</td>
+      <td>${r.doc_no || "-"}</td>
+      <td>${r.customer_name || "-"}</td>
+      <td>${r.product_name || "-"}</td>
+      <td>${r.spec || "-"}</td>
+      <td class="num">${fmtNum(r.qty)}</td>
+      <td class="num">${fmtNum(r.unit_price)}</td>
+      <td class="num">${fmtNum(r.total_amount)}</td>
+      <td>${r.warehouse || "-"}</td>
+      <td>${r.complete_yn === "완료" ? '<span class="badge ok">완료</span>' : `<span class="badge no">${r.complete_yn || "-"}</span>`}</td>
+    </tr>
+  `).join("");
+}
+
+document.getElementById("search-btn").addEventListener("click", () => { page = 0; loadSales(); });
+document.getElementById("reset-btn").addEventListener("click", () => {
+  document.getElementById("f-start").value = "";
+  document.getElementById("f-end").value = "";
+  document.getElementById("f-customer").value = "";
+  document.getElementById("f-product").value = "";
+  page = 0;
+  loadSales();
+});
+document.getElementById("prev-btn").addEventListener("click", () => { if (page > 0) { page--; loadSales(); } });
+document.getElementById("next-btn").addEventListener("click", () => { page++; loadSales(); });
+
+(async function () {
+  const session = await requireAuth("sales");
+  if (!session) return;
+  loadSales();
+})();
+</script>
+</body>
+</html>

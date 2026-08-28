@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>대시보드 · 영업관리 CRM</title>
+<link rel="stylesheet" href="css/style.css" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+<script src="js/supabaseClient.js"></script>
+<script src="js/auth-guard.js"></script>
+</head>
+<body>
+<div class="page">
+  <h1 class="page-title">대시보드</h1>
+  <p class="page-sub" id="period-label">불러오는 중...</p>
+
+  <div class="kpi-grid" id="kpi-grid">
+    <div class="kpi-card"><div class="label">매출</div><div class="value" id="kpi-sales">-</div></div>
+    <div class="kpi-card"><div class="label">매출원가</div><div class="value" id="kpi-cost">-</div></div>
+    <div class="kpi-card"><div class="label">매출총이익</div><div class="value" id="kpi-profit">-</div></div>
+    <div class="kpi-card"><div class="label">이익률</div><div class="value" id="kpi-rate">-</div></div>
+    <div class="kpi-card"><div class="label">활성 거래처 수</div><div class="value" id="kpi-customers">-</div></div>
+  </div>
+
+  <div class="panel">
+    <div style="font-weight:700; margin-bottom:10px;">최근 30일 매출 추이</div>
+    <div class="chart-wrap"><canvas id="trend-chart"></canvas></div>
+  </div>
+
+  <div class="panel">
+    <div style="font-weight:700; margin-bottom:10px;">품목별 매출 TOP 10 (선택 기간)</div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>품목명</th><th>규격</th><th class="num">매출액</th><th class="num">매출총이익</th><th class="num">이익률</th></tr></thead>
+        <tbody id="top-products-body"><tr><td colspan="5" class="empty-state">불러오는 중...</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+(async function () {
+  const session = await requireAuth("dashboard");
+  if (!session) return;
+
+  // Find latest available date in profit_daily to anchor "current period" (backfilled history data).
+  const { data: latestRows, error: latestErr } = await sb
+    .from("profit_daily")
+    .select("profit_date")
+    .order("profit_date", { ascending: false })
+    .limit(1);
+
+  if (latestErr || !latestRows || !latestRows.length) {
+    document.getElementById("period-label").textContent = "표시할 데이터가 없습니다.";
+    document.getElementById("top-products-body").innerHTML = '<tr><td colspan="5" class="empty-state">데이터가 없습니다.</td></tr>';
+    return;
+  }
+
+  const latest = new Date(latestRows[0].profit_date);
+  const monthStart = new Date(latest.getFullYear(), latest.getMonth(), 1);
+  const monthEnd = new Date(latest.getFullYear(), latest.getMonth() + 1, 0);
+  const monthLabel = `${latest.getFullYear()}-${String(latest.getMonth() + 1).padStart(2, "0")}`;
+  document.getElementById("period-label").textContent = `기준월: ${monthLabel} (데이터상 최신월)`;
+
+  const toISO = (d) => d.toISOString().slice(0, 10);
+
+  const { data: monthRows } = await sb
+    .from("profit_daily")
+    .select("profit_date, product_name, spec, sales_amount, cost_amount, profit_amount")
+    .gte("profit_date", toISO(monthStart))
+    .lte("profit_date", toISO(monthEnd));
+
+  const rows = monthRows || [];
+  const sumSales = rows.reduce((a, r) => a + (Number(r.sales_amount) || 0), 0);
+  const sumCost = rows.reduce((a, r) => a + (Number(r.cost_amount) || 0), 0);
+  const sumProfit = rows.reduce((a, r) => a + (Number(r.profit_amount) || 0), 0);
+  const rate = sumSales ? (sumProfit / sumSales) * 100 : 0;
+
+  document.getElementById("kpi-sales").textContent = fmtNum(sumSales);
+  document.getElementById("kpi-cost").textContent = fmtNum(sumCost);
+  document.getElementById("kpi-profit").textContent = fmtNum(sumProfit);
+  document.getElementById("kpi-profit").className = "value " + (sumProfit >= 0 ? "pos" : "neg");
+  document.getElementById("kpi-rate").textContent = fmtPct(rate);
+  document.getElementById("kpi-rate").className = "value " + (rate >= 0 ? "pos" : "neg");
+
+  const { data: custRows } = await sb
+    .from("sales")
+    .select("customer_code")
+    .gte("sale_date", toISO(monthStart))
+    .lte("sale_date", toISO(monthEnd));
+  const custSet = new Set((custRows || []).map((r) => r.customer_code).filter(Boolean));
+  document.getElementById("kpi-customers").textContent = fmtNum(custSet.size);
+
+  // Top 10 products by sales amount for the month
+  const byProduct = {};
+  for (const r of rows) {
+    const key = r.product_name + "|" + (r.spec || "");
+    if (!byProduct[key]) byProduct[key] = { name: r.product_name, spec: r.spec, sales: 0, profit: 0 };
+    byProduct[key].sales += Number(r.sales_amount) || 0;
+    byProduct[key].profit += Number(r.profit_amount) || 0;
+  }
+  const top = Object.values(byProduct).sort((a, b) => b.sales - a.sales).slice(0, 10);
+  const tbody = document.getElementById("top-products-body");
+  tbody.innerHTML = top.length
+    ? top.map((p) => {
+        const r = p.sales ? (p.profit / p.sales) * 100 : 0;
+        return `<tr><td>${p.name || "-"}</td><td>${p.spec || "-"}</td><td class="num">${fmtNum(p.sales)}</td><td class="num">${fmtNum(p.profit)}</td><td class="num">${fmtPct(r)}</td></tr>`;
+      }).join("")
+    : '<tr><td colspan="5" class="empty-state">데이터가 없습니다.</td></tr>';
+
+  // Last 30 days trend ending at latest date
+  const trendStart = new Date(latest);
+  trendStart.setDate(trendStart.getDate() - 29);
+  const { data: trendRows } = await sb
+    .from("profit_daily")
+    .select("profit_date, sales_amount")
+    .gte("profit_date", toISO(trendStart))
+    .lte("profit_date", toISO(latest));
+
+  const byDate = {};
+  for (const r of trendRows || []) {
+    byDate[r.profit_date] = (byDate[r.profit_date] || 0) + (Number(r.sales_amount) || 0);
+  }
+  const labels = [];
+  const values = [];
+  for (let d = new Date(trendStart); d <= latest; d.setDate(d.getDate() + 1)) {
+    const iso = toISO(d);
+    labels.push(iso.slice(5));
+    values.push(byDate[iso] || 0);
+  }
+
+  new Chart(document.getElementById("trend-chart"), {
+    type: "line",
+    data: {
+      labels,
+      datasets: [{
+        label: "일별 매출액",
+        data: values,
+        borderColor: "#2f6feb",
+        backgroundColor: "rgba(47,111,235,0.08)",
+        fill: true,
+        tension: 0.25,
+        pointRadius: 0,
+      }],
+    },
+    options: {
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: { y: { ticks: { callback: (v) => fmtNum(v) } } },
+    },
+  });
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>로그인 · 영업관리 CRM</title>
+<link rel="stylesheet" href="css/style.css" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="js/supabaseClient.js"></script>
+</head>
+<body>
+  <div class="auth-shell">
+    <div class="auth-card">
+      <h1>영업관리 CRM</h1>
+      <p class="sub">로그인해서 거래처·재고·판매 데이터를 확인하세요.</p>
+      <form id="login-form">
+        <div class="field">
+          <label for="email">이메일</label>
+          <input id="email" type="email" autocomplete="username" required />
+        </div>
+        <div class="field">
+          <label for="password">비밀번호</label>
+          <input id="password" type="password" autocomplete="current-password" required />
+        </div>
+        <button type="submit" class="primary" id="login-btn">로그인</button>
+        <div class="auth-error" id="login-error"></div>
+      </form>
+    </div>
+  </div>
+
+<script>
+  sb.auth.getSession().then(({ data: { session } }) => {
+    if (session) location.replace("dashboard.html");
+  });
+
+  const form = document.getElementById("login-form");
+  const errorEl = document.getElementById("login-error");
+  const btn = document.getElementById("login-btn");
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    errorEl.textContent = "";
+    btn.disabled = true;
+    btn.textContent = "로그인 중...";
+    const email = document.getElementById("email").value.trim();
+    const password = document.getElementById("password").value;
+    const { error } = await sb.auth.signInWithPassword({ email, password });
+    btn.disabled = false;
+    btn.textContent = "로그인";
+    if (error) {
+      errorEl.textContent = "로그인 실패: 이메일 또는 비밀번호를 확인해주세요.";
+      return;
+    }
+    location.replace("dashboard.html");
+  });
+</script>
+</body>
+</html>

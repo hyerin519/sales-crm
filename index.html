@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<title>영업관리 CRM</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="js/supabaseClient.js"></script>
+</head>
+<body>
+<script>
+  sb.auth.getSession().then(({ data: { session } }) => {
+    location.replace(session ? "dashboard.html" : "login.html");
+  });
+</script>
+</body>
+</html>

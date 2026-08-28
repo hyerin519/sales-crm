@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>재고 · 영업관리 CRM</title>
+<link rel="stylesheet" href="css/style.css" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="js/supabaseClient.js"></script>
+<script src="js/auth-guard.js"></script>
+</head>
+<body>
+<div class="page">
+  <h1 class="page-title">재고 현황</h1>
+  <p class="page-sub">업로드된 재고자산명세서 스냅샷을 기준일별로 조회합니다.</p>
+
+  <div class="form-row">
+    <div class="field">
+      <label>기준일</label>
+      <select id="snapshot-select" style="width:160px"></select>
+    </div>
+    <div class="field">
+      <label>검색 (품목명 / 코드)</label>
+      <input id="search" placeholder="예: 라이신" style="width:220px" />
+    </div>
+    <button id="search-btn" class="primary">검색</button>
+    <span class="hint" id="summary-label"></span>
+  </div>
+
+  <div class="panel">
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>품목코드</th><th>품목명</th><th>규격</th><th class="num">재고수량</th><th class="num">재고단가</th><th class="num">재고금액</th></tr>
+        </thead>
+        <tbody id="inv-body"><tr><td colspan="6" class="empty-state">불러오는 중...</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+let snapshotDates = [];
+let keyword = "";
+
+async function loadSnapshotDates() {
+  const { data, error } = await sb
+    .from("inventory_snapshots")
+    .select("snapshot_date")
+    .order("snapshot_date", { ascending: false });
+  if (error || !data || !data.length) return [];
+  return [...new Set(data.map((r) => r.snapshot_date))];
+}
+
+async function loadInventory(date) {
+  const body = document.getElementById("inv-body");
+  body.innerHTML = '<tr><td colspan="6" class="empty-state">불러오는 중...</td></tr>';
+
+  let query = sb.from("inventory_snapshots").select("*").eq("snapshot_date", date);
+  if (keyword) query = query.or(`product_name.ilike.%${keyword}%,product_code.ilike.%${keyword}%`);
+  query = query.order("amount", { ascending: false });
+
+  const { data, error } = await query;
+  if (error) {
+    body.innerHTML = `<tr><td colspan="6" class="empty-state">오류: ${error.message}</td></tr>`;
+    return;
+  }
+  if (!data || !data.length) {
+    body.innerHTML = '<tr><td colspan="6" class="empty-state">데이터가 없습니다.</td></tr>';
+    document.getElementById("summary-label").textContent = "";
+    return;
+  }
+
+  const totalAmount = data.reduce((a, r) => a + (Number(r.amount) || 0), 0);
+  document.getElementById("summary-label").textContent = `${fmtNum(data.length)}개 품목 · 총 재고금액 ${fmtNum(totalAmount)}`;
+
+  body.innerHTML = data.map((r) => `
+    <tr>
+      <td>${r.product_code || "-"}</td>
+      <td>${r.product_name || "-"}</td>
+      <td>${r.spec || "-"}</td>
+      <td class="num">${fmtNum(r.qty)}</td>
+      <td class="num">${fmtNum(r.unit_price)}</td>
+      <td class="num">${fmtNum(r.amount)}</td>
+    </tr>
+  `).join("");
+}
+
+document.getElementById("snapshot-select").addEventListener("change", (e) => {
+  loadInventory(e.target.value);
+});
+document.getElementById("search-btn").addEventListener("click", () => {
+  keyword = document.getElementById("search").value.trim();
+  loadInventory(document.getElementById("snapshot-select").value);
+});
+document.getElementById("search").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") document.getElementById("search-btn").click();
+});
+
+(async function () {
+  const session = await requireAuth("inventory");
+  if (!session) return;
+
+  snapshotDates = await loadSnapshotDates();
+  const select = document.getElementById("snapshot-select");
+  if (!snapshotDates.length) {
+    document.getElementById("inv-body").innerHTML = '<tr><td colspan="6" class="empty-state">업로드된 재고 데이터가 없습니다.</td></tr>';
+    return;
+  }
+  select.innerHTML = snapshotDates.map((d) => `<option value="${d}">${d}</option>`).join("");
+  loadInventory(snapshotDates[0]);
+})();
+</script>
+</body>
+</html>

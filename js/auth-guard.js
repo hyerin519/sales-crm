@@ -6,6 +6,10 @@ const NAV_GROUPS = [
     { key: "products", href: "products.html", icon: "bi-box-seam", label: "품목별 실적" },
     { key: "profit", href: "profit.html", icon: "bi-graph-up-arrow", label: "매출이익현황" },
   ]},
+  { label: "영업", items: [
+    { key: "deals", href: "deals.html", icon: "bi-kanban", label: "수주관리" },
+    { key: "schedule", href: "schedule.html", icon: "bi-calendar-week", label: "일정·활동" },
+  ]},
   { label: "거래처·재고", items: [
     { key: "customers", href: "customers.html", icon: "bi-building", label: "거래처" },
     { key: "inventory", href: "inventory.html", icon: "bi-archive", label: "재고" },
@@ -21,6 +25,9 @@ function renderNav(activeKey, email) {
   sb_.id = "sidebar";
   sb_.innerHTML = `
     <div class="brand"><div class="ico"><i class="bi bi-bar-chart-line"></i></div><div><div class="brand-name">영업관리 CRM</div><div class="brand-sub">사료원료 영업</div></div></div>
+    <div style="padding:8px 10px 0">
+      <button id="gsearch-btn" style="width:100%;justify-content:flex-start;gap:8px;color:#94a3b8;font-weight:500"><i class="bi bi-search"></i><span style="flex:1;text-align:left">거래처·품목 검색</span><kbd style="font-size:10px;background:#f1f5f9;border-radius:4px;padding:1px 5px">Ctrl K</kbd></button>
+    </div>
     <div class="nav-section">
       ${NAV_GROUPS.map(g => `
         <div class="nav-label">${g.label}</div>
@@ -35,6 +42,7 @@ function renderNav(activeKey, email) {
     </div>
   `;
   document.body.prepend(sb_);
+  initGlobalSearch();
 
   const toggle = document.createElement("button");
   toggle.id = "mnav-toggle";
@@ -66,6 +74,65 @@ async function requireAuth(activeKey) {
   }
   renderNav(activeKey, session.user.email);
   return session;
+}
+
+/* ───────────────── 통합검색 (Ctrl+K) ───────────────── */
+let GS_DATA = null;
+function initGlobalSearch() {
+  const btn = document.getElementById("gsearch-btn");
+  if (btn) btn.addEventListener("click", openGlobalSearch);
+  if (!window.__gsKeyBound) {
+    window.__gsKeyBound = true;
+    document.addEventListener("keydown", (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") { e.preventDefault(); openGlobalSearch(); }
+      else if (e.key === "Escape") closeGlobalSearch();
+    });
+  }
+}
+function ensureGsRoot() {
+  if (document.getElementById("gs-overlay")) return;
+  const ov = document.createElement("div");
+  ov.id = "gs-overlay";
+  ov.className = "gs-overlay";
+  ov.innerHTML = `
+    <div class="gs-box">
+      <div class="gs-input-wrap"><i class="bi bi-search"></i><input id="gs-input" placeholder="거래처명 또는 품목명 입력..." autocomplete="off" /><kbd>ESC</kbd></div>
+      <div class="gs-results" id="gs-results"></div>
+    </div>`;
+  ov.addEventListener("click", (e) => { if (e.target === ov) closeGlobalSearch(); });
+  document.body.appendChild(ov);
+  document.getElementById("gs-input").addEventListener("input", (e) => renderGsResults(e.target.value));
+}
+async function openGlobalSearch() {
+  ensureGsRoot();
+  if (!GS_DATA) {
+    const [{ data: customers }, { data: products }] = await Promise.all([
+      sb.from("customers").select("code,name"),
+      sb.from("products").select("code,name,spec"),
+    ]);
+    GS_DATA = { customers: customers || [], products: products || [] };
+  }
+  document.getElementById("gs-overlay").classList.add("on");
+  const input = document.getElementById("gs-input");
+  input.value = "";
+  renderGsResults("");
+  setTimeout(() => input.focus(), 30);
+}
+function closeGlobalSearch() {
+  const ov = document.getElementById("gs-overlay");
+  if (ov) ov.classList.remove("on");
+}
+function renderGsResults(q) {
+  const el = document.getElementById("gs-results");
+  const kw = q.trim().toLowerCase();
+  if (!kw) { el.innerHTML = '<div class="gs-empty">거래처명 또는 품목명을 입력하세요</div>'; return; }
+  const custMatches = GS_DATA.customers.filter((c) => (c.name || "").toLowerCase().includes(kw)).slice(0, 6);
+  const prodMatches = GS_DATA.products.filter((p) => (p.name || "").toLowerCase().includes(kw)).slice(0, 6);
+  if (!custMatches.length && !prodMatches.length) { el.innerHTML = '<div class="gs-empty">검색 결과가 없습니다</div>'; return; }
+  let html = "";
+  if (custMatches.length) html += `<div class="gs-group">거래처</div>` + custMatches.map((c) => `<a class="gs-item" href="customers.html?code=${encodeURIComponent(c.code)}"><i class="bi bi-building"></i><span>${esc(c.name)}</span></a>`).join("");
+  if (prodMatches.length) html += `<div class="gs-group">품목</div>` + prodMatches.map((p) => `<a class="gs-item" href="products.html?code=${encodeURIComponent(p.code)}"><i class="bi bi-box-seam"></i><span>${esc(p.name)} <span class="mut">${esc(p.spec || "")}</span></span></a>`).join("");
+  el.innerHTML = html;
 }
 
 function esc(s) {
@@ -217,6 +284,40 @@ async function fetchAllRows(queryFn, pageSize) {
     from += pageSize;
   }
   return all;
+}
+
+/* ───────────────── 자동완성 ───────────────── */
+// input에 <datalist> 붙이기(순수 문자열 후보). 같은 input에 다시 호출하면 후보만 갱신.
+function attachDatalist(inputEl, options) {
+  const listId = inputEl.id + "-dl";
+  let dl = document.getElementById(listId);
+  if (!dl) {
+    dl = document.createElement("datalist");
+    dl.id = listId;
+    document.body.appendChild(dl);
+    inputEl.setAttribute("list", listId);
+    inputEl.setAttribute("autocomplete", "off");
+  }
+  dl.innerHTML = options.map((o) => `<option value="${esc(o)}"></option>`).join("");
+}
+
+// 거래처명 입력 자동완성 + 선택 시 코드 매칭. customers: [{code,name}]
+function setupCustomerPicker(inputEl, customers, onSelect) {
+  attachDatalist(inputEl, customers.map((c) => c.name));
+  inputEl.addEventListener("input", () => {
+    const match = customers.find((c) => c.name === inputEl.value.trim());
+    if (match) onSelect(match);
+  });
+}
+
+async function fetchCustomerList() {
+  const { data } = await sb.from("customers").select("code,name").order("name");
+  return data || [];
+}
+
+async function fetchProductList() {
+  const { data } = await sb.from("products").select("code,name,spec").order("name");
+  return data || [];
 }
 
 function periodToDates(p) {

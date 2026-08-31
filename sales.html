@@ -152,6 +152,10 @@ document.getElementById("next-btn").addEventListener("click", () => { page++; lo
   });
 
   loadSales();
+
+  const [customers, products] = await Promise.all([fetchCustomerList(), fetchProductList()]);
+  attachDatalist(document.getElementById("f-customer"), customers.map((c) => c.name));
+  attachDatalist(document.getElementById("f-product"), [...new Set(products.map((p) => p.name))]);
 })();
 </script>
 </body>

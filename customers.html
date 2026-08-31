@@ -158,6 +158,25 @@ async function openDetail(code) {
   }
   const months = Object.keys(byMonth).sort().slice(-12);
 
+  // 품목별 구매단가 — 이 거래처가 각 품목을 평균 얼마에 사가는지
+  const byProduct = {};
+  for (const t of txns) {
+    const key = t.product_code || t.product_name;
+    if (!key) continue;
+    if (!byProduct[key]) byProduct[key] = { name: t.product_name, spec: t.spec, qty: 0, amount: 0, last: t.sale_date, lastPrice: t.unit_price };
+    byProduct[key].qty += Number(t.qty) || 0;
+    byProduct[key].amount += Number(t.supply_amount) || 0;
+    if (t.sale_date > byProduct[key].last) { byProduct[key].last = t.sale_date; byProduct[key].lastPrice = t.unit_price; }
+  }
+  const productRows = Object.values(byProduct).map((p) => ({ ...p, avgPrice: p.qty ? p.amount / p.qty : 0 })).sort((a, b) => b.amount - a.amount);
+
+  const [{ data: deals }, { data: activities }] = await Promise.all([
+    sb.from("deals").select("*").eq("customer_code", code).order("created_at", { ascending: false }),
+    sb.from("activities").select("*").eq("customer_code", code).order("activity_date", { ascending: false }),
+  ]);
+  const openDeals = (deals || []).filter((d) => !["완료", "실주"].includes(d.stage));
+  const recentActs = (activities || []).slice(0, 5);
+
   const body = `
     <div class="tile-row">
       <div class="tile"><div class="l">누적 매출액</div><div class="v">${fmtWon(totalAmount)}</div></div>
@@ -167,6 +186,12 @@ async function openDetail(code) {
     </div>
     <div class="dsec">월별 매출 추이 (최근 12개월)</div>
     <div style="height:120px"><canvas id="cust-trend-chart"></canvas></div>
+
+    <div class="dsec">진행중 수주 (${openDeals.length}) <a href="deals.html?new_for=${encodeURIComponent(code)}" style="font-size:11px;font-weight:600;margin-left:6px"><i class="bi bi-plus-circle"></i> 새 수주</a></div>
+    ${openDeals.length ? `<div class="table-wrap"><table class="wt-tbl"><thead><tr><th class="l">건명</th><th class="l">단계</th><th>예상금액</th><th class="l">마감예정</th></tr></thead><tbody>${openDeals.map((d) => `<tr class="clk" onclick="location.href='deals.html'"><td class="l">${esc(d.title)}</td><td class="l"><span class="badge-st info">${esc(d.stage)}</span></td><td>${fmtWon(d.expected_amount)}</td><td class="l">${d.expected_close_date || "-"}</td></tr>`).join("")}</tbody></table></div>` : '<div class="empty-state">진행중인 수주 건이 없습니다.</div>'}
+
+    <div class="dsec">최근 활동 (${(activities || []).length}) <a href="schedule.html?new_for=${encodeURIComponent(code)}" style="font-size:11px;font-weight:600;margin-left:6px"><i class="bi bi-plus-circle"></i> 새 활동</a></div>
+    ${recentActs.length ? recentActs.map((a) => `<div class="drow"><span class="k">${a.activity_date} · ${esc(a.activity_type || "")}</span><span class="v" style="text-align:left;max-width:70%">${esc(a.content || a.next_action || "-")}</span></div>`).join("") : '<div class="empty-state">활동 기록이 없습니다.</div>'}
 
     <div class="dsec">담당자·연락처</div>
     <div class="wt-grid g-2">
@@ -180,10 +205,16 @@ async function openDetail(code) {
       <button class="primary" onclick="saveDetail('${esc(code)}')">저장</button><span class="hint" id="save-status" style="margin:0"></span>
     </div>
 
+    <div class="dsec">품목별 구매단가 (이 거래처 기준)</div>
+    <div class="table-wrap"><table class="wt-tbl">
+      <thead><tr><th class="l">품목</th><th class="l">규격</th><th>누적수량</th><th>평균단가</th><th>최근단가</th><th class="l">최근구매일</th></tr></thead>
+      <tbody>${productRows.map((p) => `<tr class="clk" onclick="location.href='products.html'"><td class="l">${esc(p.name || "-")}</td><td class="l tx2">${esc(p.spec || "-")}</td><td>${fmtNum(p.qty)}</td><td>${fmtNum(p.avgPrice)}</td><td>${fmtNum(p.lastPrice)}</td><td class="l">${p.last}</td></tr>`).join("") || '<tr><td colspan="6" class="empty-state">거래 내역이 없습니다.</td></tr>'}</tbody>
+    </table></div>
+
     <div class="dsec">최근 거래 내역 (최근 20건)</div>
     <div class="table-wrap"><table class="wt-tbl">
-      <thead><tr><th class="l">일자</th><th class="l">품목</th><th class="l">규격</th><th>수량</th><th>공급가액</th></tr></thead>
-      <tbody>${txns.slice(0, 20).map((t) => `<tr><td class="l">${t.sale_date}</td><td class="l">${esc(t.product_name || "-")}</td><td class="l">${esc(t.spec || "-")}</td><td>${fmtNum(t.qty)}</td><td>${fmtNum(t.supply_amount)}</td></tr>`).join("") || '<tr><td colspan="5" class="empty-state">거래 내역이 없습니다.</td></tr>'}</tbody>
+      <thead><tr><th class="l">일자</th><th class="l">품목</th><th class="l">규격</th><th>수량</th><th>단가</th><th>공급가액</th></tr></thead>
+      <tbody>${txns.slice(0, 20).map((t) => `<tr><td class="l">${t.sale_date}</td><td class="l">${esc(t.product_name || "-")}</td><td class="l">${esc(t.spec || "-")}</td><td>${fmtNum(t.qty)}</td><td>${fmtNum(t.unit_price)}</td><td>${fmtNum(t.supply_amount)}</td></tr>`).join("") || '<tr><td colspan="6" class="empty-state">거래 내역이 없습니다.</td></tr>'}</tbody>
     </table></div>
   `;
   openModal(`<i class="bi bi-building"></i> ${esc(cust.name)} <span style="font-size:12px;color:var(--mut);font-weight:500">${esc(cust.code)}</span>`, body, true);
@@ -225,6 +256,7 @@ document.getElementById("search").addEventListener("keydown", (e) => {
   if (!session) return;
   CUSTOMERS = await loadAll();
   LATEST_DATE = ALL_SALES.reduce((max, r) => { const d = new Date(r.sale_date); return !max || d > max ? d : max; }, null);
+  attachDatalist(document.getElementById("search"), CUSTOMERS.map((c) => c.name));
   renderTable(CUSTOMERS);
 
   const code = new URLSearchParams(location.search).get("code");

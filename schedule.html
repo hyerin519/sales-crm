@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>일정·활동 · 영업관리 CRM</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css" rel="stylesheet" />
+<link rel="stylesheet" href="css/style.css" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="js/supabaseClient.js"></script>
+<script src="js/auth-guard.js"></script>
+</head>
+<body>
+<div class="page">
+  <div class="page-header">
+    <div>
+      <div class="page-kick">WONTECH FEED · ACTIVITIES</div>
+      <div class="page-title"><i class="bi bi-calendar-week"></i>일정·활동</div>
+    </div>
+    <button class="primary" onclick="openActivityModal()"><i class="bi bi-plus-lg"></i> 새 활동/일정</button>
+  </div>
+  <p class="hint" style="margin:-6px 0 12px">거래처별 상담·방문 기록과 다음 액션(follow-up)을 관리합니다. 다음 액션일이 지난 항목은 자동으로 "지연"으로 표시됩니다.</p>
+
+  <div class="kpi-grid" id="kpi-strip"></div>
+
+  <div class="wt-tools">
+    <span class="pl">보기</span>
+    <button class="pp-chip on" data-f="all">전체</button>
+    <button class="pp-chip" data-f="overdue">지연</button>
+    <button class="pp-chip" data-f="upcoming">예정</button>
+    <button class="pp-chip" data-f="done">완료</button>
+    <span class="pl" style="margin-left:10px">거래처</span>
+    <input id="search" placeholder="거래처명" style="width:180px" />
+  </div>
+
+  <div class="panel">
+    <div class="table-wrap">
+      <table class="wt-tbl">
+        <thead><tr>
+          <th class="l">활동일</th><th class="l">거래처</th><th class="l">유형</th><th class="l">내용</th><th class="l">다음 액션</th><th class="l">다음 액션일</th><th>완료</th>
+        </tr></thead>
+        <tbody id="act-body"><tr><td colspan="7" class="empty-state">불러오는 중...</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+let ACTIVITIES = [];
+let CUSTOMERS = [];
+let filterMode = "all";
+let keyword = "";
+let editingId = null;
+
+function todayISO() { return new Date().toISOString().slice(0, 10); }
+
+function classify(a) {
+  if (a.done) return "done";
+  if (a.next_action_date && a.next_action_date < todayISO()) return "overdue";
+  return "upcoming";
+}
+
+function renderKpi() {
+  const overdue = ACTIVITIES.filter((a) => classify(a) === "overdue").length;
+  const todayCount = ACTIVITIES.filter((a) => a.next_action_date === todayISO() && !a.done).length;
+  const weekEnd = new Date(); weekEnd.setDate(weekEnd.getDate() + 7);
+  const upcoming7 = ACTIVITIES.filter((a) => !a.done && a.next_action_date && a.next_action_date >= todayISO() && a.next_action_date <= weekEnd.toISOString().slice(0, 10)).length;
+  document.getElementById("kpi-strip").innerHTML = `
+    <div class="kpi-card"><div class="label">오늘 처리할 액션</div><div class="value ${todayCount ? "neg" : ""}">${fmtNum(todayCount)}</div></div>
+    <div class="kpi-card"><div class="label">지연된 액션</div><div class="value ${overdue ? "neg" : ""}">${fmtNum(overdue)}</div></div>
+    <div class="kpi-card"><div class="label">7일 이내 예정</div><div class="value">${fmtNum(upcoming7)}</div></div>
+    <div class="kpi-card"><div class="label">전체 활동 기록</div><div class="value">${fmtNum(ACTIVITIES.length)}</div></div>
+  `;
+}
+
+function render() {
+  renderKpi();
+  let rows = ACTIVITIES.slice();
+  if (filterMode !== "all") rows = rows.filter((a) => classify(a) === filterMode);
+  if (keyword) { const kw = keyword.toLowerCase(); rows = rows.filter((a) => (a.customer_name || "").toLowerCase().includes(kw)); }
+  rows.sort((a, b) => (b.activity_date || "").localeCompare(a.activity_date || ""));
+
+  document.getElementById("act-body").innerHTML = rows.length
+    ? rows.map((a) => {
+        const cls = classify(a);
+        const badge = cls === "overdue" ? '<span class="badge-st no">지연</span>' : cls === "done" ? '<span class="badge-st ok">완료</span>' : '<span class="badge-st info">예정</span>';
+        return `<tr class="clk" onclick="openActivityModal(${a.id})">
+          <td class="l">${a.activity_date}</td>
+          <td class="l nm">${a.customer_code ? `<a href="customers.html?code=${encodeURIComponent(a.customer_code)}" onclick="event.stopPropagation()">${esc(a.customer_name || "-")}</a>` : esc(a.customer_name || "-")}</td>
+          <td class="l">${esc(a.activity_type || "-")}</td>
+          <td class="l" style="max-width:260px;white-space:normal">${esc(a.content || "-")}</td>
+          <td class="l">${esc(a.next_action || "-")}</td>
+          <td class="l">${a.next_action_date || "-"} ${badge}</td>
+          <td onclick="event.stopPropagation()"><input type="checkbox" ${a.done ? "checked" : ""} onchange="toggleDone(${a.id}, this.checked)" /></td>
+        </tr>`;
+      }).join("")
+    : '<tr><td colspan="7" class="empty-state">해당하는 활동이 없습니다.</td></tr>';
+}
+
+async function toggleDone(id, done) {
+  await sb.from("activities").update({ done }).eq("id", id);
+  const a = ACTIVITIES.find((x) => x.id === id);
+  if (a) a.done = done;
+  render();
+}
+
+function openActivityModal(id, prefillCustomer) {
+  editingId = id || null;
+  const a = id ? ACTIVITIES.find((x) => x.id === id) : null;
+  const prefillName = a ? a.customer_name : (prefillCustomer ? prefillCustomer.name : "");
+  const prefillCode = a ? (a.customer_code || "") : (prefillCustomer ? prefillCustomer.code : "");
+  const body = `
+    <div class="field" style="margin-bottom:10px"><label>거래처 *</label><input id="m-cust" value="${esc(prefillName)}" placeholder="거래처명 입력 (자동완성)" /><input type="hidden" id="m-cust-code" value="${esc(prefillCode)}" /></div>
+    <div class="wt-grid g-2">
+      <div class="field"><label>활동일 *</label><input type="date" id="m-date" value="${a ? a.activity_date : todayISO()}" /></div>
+      <div class="field"><label>유형</label><select id="m-type">
+        ${["방문", "전화", "이메일", "미팅", "기타"].map((t) => `<option value="${t}" ${a && a.activity_type === t ? "selected" : ""}>${t}</option>`).join("")}
+      </select></div>
+    </div>
+    <div class="field" style="margin-top:10px"><label>내용</label><textarea id="m-content" rows="3">${esc(a ? a.content || "" : "")}</textarea></div>
+    <div class="wt-grid g-2" style="margin-top:10px">
+      <div class="field"><label>다음 액션</label><input id="m-next" value="${esc(a ? a.next_action || "" : "")}" placeholder="예: 견적서 발송" /></div>
+      <div class="field"><label>다음 액션일</label><input type="date" id="m-next-date" value="${a ? a.next_action_date || "" : ""}" /></div>
+    </div>
+    <div class="field" style="margin-top:10px"><label><input type="checkbox" id="m-done" ${a && a.done ? "checked" : ""} style="width:auto;margin-right:6px" />완료 처리</label></div>
+    <div style="margin-top:16px;display:flex;gap:10px;align-items:center">
+      <button class="primary" onclick="saveActivity()">저장</button>
+      ${a ? '<button onclick="deleteActivity()" style="color:var(--red)">삭제</button>' : ""}
+      <span class="hint" id="m-status" style="margin:0"></span>
+    </div>
+  `;
+  openModal(`<i class="bi bi-calendar-plus"></i> ${a ? "활동 수정" : "새 활동/일정"}`, body);
+  setupCustomerPicker(document.getElementById("m-cust"), CUSTOMERS, (c) => { document.getElementById("m-cust-code").value = c.code; });
+}
+
+async function saveActivity() {
+  const custName = document.getElementById("m-cust").value.trim();
+  const custCode = document.getElementById("m-cust-code").value.trim();
+  const date = document.getElementById("m-date").value;
+  if (!custName || !date) { document.getElementById("m-status").textContent = "거래처와 활동일은 필수입니다."; return; }
+  const payload = {
+    customer_code: custCode || null,
+    customer_name: custName,
+    activity_date: date,
+    activity_type: document.getElementById("m-type").value,
+    content: document.getElementById("m-content").value.trim() || null,
+    next_action: document.getElementById("m-next").value.trim() || null,
+    next_action_date: document.getElementById("m-next-date").value || null,
+    done: document.getElementById("m-done").checked,
+  };
+  const statusEl = document.getElementById("m-status");
+  statusEl.textContent = "저장 중...";
+  let error;
+  if (editingId) {
+    ({ error } = await sb.from("activities").update(payload).eq("id", editingId));
+  } else {
+    ({ error } = await sb.from("activities").insert(payload));
+  }
+  if (error) { statusEl.textContent = `실패: ${error.message}`; return; }
+  closeModal();
+  await loadActivities();
+}
+
+async function deleteActivity() {
+  if (!editingId) return;
+  if (!confirm("이 활동을 삭제할까요?")) return;
+  await sb.from("activities").delete().eq("id", editingId);
+  closeModal();
+  await loadActivities();
+}
+
+async function loadActivities() {
+  const { data } = await sb.from("activities").select("*").order("activity_date", { ascending: false });
+  ACTIVITIES = data || [];
+  render();
+}
+
+document.querySelectorAll(".wt-tools .pp-chip").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".wt-tools .pp-chip").forEach((b) => b.classList.remove("on"));
+    btn.classList.add("on");
+    filterMode = btn.dataset.f;
+    render();
+  });
+});
+document.getElementById("search").addEventListener("input", (e) => { keyword = e.target.value.trim(); render(); });
+
+(async function () {
+  const session = await requireAuth("schedule");
+  if (!session) return;
+  CUSTOMERS = await fetchCustomerList();
+  await loadActivities();
+
+  const code = new URLSearchParams(location.search).get("new_for");
+  if (code) {
+    const c = CUSTOMERS.find((x) => x.code === code);
+    if (c) openActivityModal(null, c);
+  }
+})();
+</script>
+</body>
+</html>

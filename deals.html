@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>수주관리 · 영업관리 CRM</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css" rel="stylesheet" />
+<link rel="stylesheet" href="css/style.css" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="js/supabaseClient.js"></script>
+<script src="js/auth-guard.js"></script>
+</head>
+<body>
+<div class="page">
+  <div class="page-header">
+    <div>
+      <div class="page-kick">WONTECH FEED · DEAL PIPELINE</div>
+      <div class="page-title"><i class="bi bi-kanban"></i>수주관리</div>
+    </div>
+    <button class="primary" onclick="openDealModal()"><i class="bi bi-plus-lg"></i> 새 수주 건</button>
+  </div>
+  <p class="hint" style="margin:-6px 0 12px">거래처별 상담·견적 진행 상황을 단계별로 관리합니다. 카드를 클릭하면 단계를 바꾸거나 수정할 수 있습니다.</p>
+
+  <div class="kpi-grid" id="kpi-strip"></div>
+
+  <div class="panel">
+    <div class="kanban" id="board"></div>
+  </div>
+</div>
+
+<script>
+const STAGES = ["문의", "견적", "협상", "수주", "완료", "실주"];
+let DEALS = [];
+let CUSTOMERS = [];
+let editingId = null;
+
+function renderKpi() {
+  const open = DEALS.filter((d) => !["완료", "실주"].includes(d.stage));
+  const openAmt = open.reduce((a, d) => a + (Number(d.expected_amount) || 0), 0);
+  const closedTotal = DEALS.filter((d) => ["수주", "완료", "실주"].includes(d.stage)).length;
+  const won = DEALS.filter((d) => ["수주", "완료"].includes(d.stage)).length;
+  const winRate = closedTotal ? (won / closedTotal) * 100 : null;
+  const thisMonth = new Date().toISOString().slice(0, 7);
+  const closingThisMonth = open.filter((d) => d.expected_close_date && d.expected_close_date.slice(0, 7) === thisMonth);
+
+  document.getElementById("kpi-strip").innerHTML = `
+    <div class="kpi-card"><div class="label">진행중 건수</div><div class="value">${fmtNum(open.length)}</div></div>
+    <div class="kpi-card"><div class="label">진행중 예상금액</div><div class="value">${fmtWon(openAmt)}</div></div>
+    <div class="kpi-card"><div class="label">이번달 마감 예정</div><div class="value">${fmtNum(closingThisMonth.length)}</div></div>
+    <div class="kpi-card"><div class="label">수주 성공률</div><div class="value">${winRate === null ? "-" : winRate.toFixed(0) + "%"}</div></div>
+  `;
+}
+
+function renderBoard() {
+  const board = document.getElementById("board");
+  board.innerHTML = STAGES.map((stage) => {
+    const items = DEALS.filter((d) => d.stage === stage).sort((a, b) => (b.expected_close_date || "").localeCompare(a.expected_close_date || ""));
+    const sum = items.reduce((a, d) => a + (Number(d.expected_amount) || 0), 0);
+    return `
+      <div class="kanban-col">
+        <div class="kanban-col-head"><span>${stage}</span><span class="n">${items.length}</span></div>
+        ${items.map((d) => `
+          <div class="kanban-card" onclick="openDealModal(${d.id})">
+            <div class="kc-cust">${esc(d.customer_name || "-")}</div>
+            <div class="kc-title">${esc(d.title)}</div>
+            <div class="kc-amt">${fmtWon(d.expected_amount)}</div>
+            <div class="kc-date">${d.expected_close_date ? "마감 " + d.expected_close_date : ""}</div>
+          </div>`).join("") || '<div class="empty-state" style="padding:16px 4px">없음</div>'}
+        <div class="kanban-col-foot">${fmtWon(sum)}</div>
+      </div>`;
+  }).join("");
+}
+
+function render() { renderKpi(); renderBoard(); }
+
+function openDealModal(id, prefillCustomer) {
+  editingId = id || null;
+  const d = id ? DEALS.find((x) => x.id === id) : null;
+  const prefillName = d ? d.customer_name : (prefillCustomer ? prefillCustomer.name : "");
+  const prefillCode = d ? (d.customer_code || "") : (prefillCustomer ? prefillCustomer.code : "");
+  const body = `
+    <div class="field" style="margin-bottom:10px"><label>거래처 *</label><input id="m-cust" value="${esc(prefillName)}" placeholder="거래처명 입력 (자동완성)" /><input type="hidden" id="m-cust-code" value="${esc(prefillCode)}" /></div>
+    <div class="field" style="margin-bottom:10px"><label>건명 *</label><input id="m-title" value="${esc(d ? d.title : "")}" placeholder="예: 4분기 라이신 공급 협상" /></div>
+    <div class="wt-grid g-2">
+      <div class="field"><label>품목/제품</label><input id="m-product" value="${esc(d ? d.product_name || "" : "")}" /></div>
+      <div class="field"><label>예상금액 (원)</label><input id="m-amount" type="number" value="${d ? d.expected_amount || "" : ""}" /></div>
+    </div>
+    <div class="wt-grid g-2" style="margin-top:10px">
+      <div class="field"><label>단계</label><select id="m-stage">${STAGES.map((s) => `<option value="${s}" ${d && d.stage === s ? "selected" : ""}>${s}</option>`).join("")}</select></div>
+      <div class="field"><label>예상 마감일</label><input type="date" id="m-close" value="${d ? d.expected_close_date || "" : ""}" /></div>
+    </div>
+    <div class="field" style="margin-top:10px"><label>메모</label><textarea id="m-memo" rows="3">${esc(d ? d.memo || "" : "")}</textarea></div>
+    <div style="margin-top:16px;display:flex;gap:10px;align-items:center">
+      <button class="primary" onclick="saveDeal()">저장</button>
+      ${d ? '<button onclick="deleteDeal()" style="color:var(--red)">삭제</button>' : ""}
+      ${d && d.customer_code ? `<a class="btn" href="schedule.html?new_for=${encodeURIComponent(d.customer_code)}"><i class="bi bi-calendar-plus"></i> 후속 일정 등록</a>` : ""}
+      <span class="hint" id="m-status" style="margin:0"></span>
+    </div>
+  `;
+  openModal(`<i class="bi bi-kanban"></i> ${d ? "수주 건 수정" : "새 수주 건"}`, body);
+  setupCustomerPicker(document.getElementById("m-cust"), CUSTOMERS, (c) => { document.getElementById("m-cust-code").value = c.code; });
+}
+
+async function saveDeal() {
+  const custName = document.getElementById("m-cust").value.trim();
+  const title = document.getElementById("m-title").value.trim();
+  if (!custName || !title) { document.getElementById("m-status").textContent = "거래처와 건명은 필수입니다."; return; }
+  const payload = {
+    customer_code: document.getElementById("m-cust-code").value.trim() || null,
+    customer_name: custName,
+    title,
+    product_name: document.getElementById("m-product").value.trim() || null,
+    expected_amount: document.getElementById("m-amount").value ? Number(document.getElementById("m-amount").value) : null,
+    stage: document.getElementById("m-stage").value,
+    expected_close_date: document.getElementById("m-close").value || null,
+    memo: document.getElementById("m-memo").value.trim() || null,
+    updated_at: new Date().toISOString(),
+  };
+  const statusEl = document.getElementById("m-status");
+  statusEl.textContent = "저장 중...";
+  let error;
+  if (editingId) {
+    ({ error } = await sb.from("deals").update(payload).eq("id", editingId));
+  } else {
+    ({ error } = await sb.from("deals").insert(payload));
+  }
+  if (error) { statusEl.textContent = `실패: ${error.message}`; return; }
+  closeModal();
+  await loadDeals();
+}
+
+async function deleteDeal() {
+  if (!editingId) return;
+  if (!confirm("이 수주 건을 삭제할까요?")) return;
+  await sb.from("deals").delete().eq("id", editingId);
+  closeModal();
+  await loadDeals();
+}
+
+async function loadDeals() {
+  const { data } = await sb.from("deals").select("*").order("created_at", { ascending: false });
+  DEALS = data || [];
+  render();
+}
+
+(async function () {
+  const session = await requireAuth("deals");
+  if (!session) return;
+  CUSTOMERS = await fetchCustomerList();
+  await loadDeals();
+
+  const code = new URLSearchParams(location.search).get("new_for");
+  if (code) {
+    const c = CUSTOMERS.find((x) => x.code === code);
+    if (c) openDealModal(null, c);
+  }
+})();
+</script>
+</body>
+</html>

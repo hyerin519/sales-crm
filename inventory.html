@@ -133,6 +133,9 @@ document.getElementById("search").addEventListener("keydown", (e) => { if (e.key
   }
   select.innerHTML = snapshotDates.map((d) => `<option value="${d}">${d}</option>`).join("");
   loadInventory(snapshotDates[0]);
+
+  const products = await fetchProductList();
+  attachDatalist(document.getElementById("search"), [...new Set(products.map((p) => p.name))]);
 })();
 </script>
 </body>

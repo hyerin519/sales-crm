@@ -37,9 +37,9 @@
       <table class="wt-tbl">
         <thead><tr>
           <th class="rk"></th><th class="l">품목명</th><th class="l">규격</th>
-          <th data-k="qty">출고수량</th><th data-k="sales">매출액</th><th data-k="yoy">전년比</th><th data-k="profit">매출총이익</th><th data-k="rate">이익률</th><th data-k="stock">현재재고</th>
+          <th data-k="qty">출고수량</th><th data-k="avgPrice">평균단가</th><th data-k="sales">매출액</th><th data-k="yoy">전년比</th><th data-k="profit">매출총이익</th><th data-k="rate">이익률</th><th data-k="stock">현재재고</th>
         </tr></thead>
-        <tbody id="prod-body"><tr><td colspan="9" class="empty-state">불러오는 중...</td></tr></tbody>
+        <tbody id="prod-body"><tr><td colspan="10" class="empty-state">불러오는 중...</td></tr></tbody>
       </table>
     </div>
   </div>
@@ -80,7 +80,7 @@ function computeRows() {
 
   let list = Object.values(agg).map((x) => {
     const prevSales = prevAgg[x.code] ? prevAgg[x.code].sales : 0;
-    return { ...x, rate: x.sales ? (x.profit / x.sales) * 100 : 0, stock: LATEST_INV_MAP[x.code] || 0, prevSales, yoy: prevSales ? (x.sales / prevSales - 1) * 100 : null };
+    return { ...x, rate: x.sales ? (x.profit / x.sales) * 100 : 0, avgPrice: x.qty ? x.sales / x.qty : 0, stock: LATEST_INV_MAP[x.code] || 0, prevSales, yoy: prevSales ? (x.sales / prevSales - 1) * 100 : null };
   });
   if (keyword) {
     const kw = keyword.toLowerCase();
@@ -115,13 +115,14 @@ function render() {
         <td class="l nm">${esc(x.name)}</td>
         <td class="l tx2">${esc(x.spec || "-")}</td>
         <td>${fmtNum(x.qty)}</td>
+        <td>${fmtNum(x.avgPrice)}</td>
         <td>${fmtNum(x.sales)}</td>
         <td>${x.yoy === null ? '<span class="mut">-</span>' : yoyBadge(x.yoy)}</td>
         <td>${fmtNum(x.profit)}</td>
         <td class="${x.rate < 0 ? "neg" : ""}" style="${x.rate < 0 ? "color:var(--red);font-weight:700" : ""}">${fmtPct(x.rate)}</td>
         <td>${fmtNum(x.stock)}</td>
       </tr>`).join("")
-    : '<tr><td colspan="9" class="empty-state">조건에 맞는 품목이 없습니다.</td></tr>';
+    : '<tr><td colspan="10" class="empty-state">조건에 맞는 품목이 없습니다.</td></tr>';
 }
 
 document.querySelectorAll("th[data-k]").forEach((th) => {
@@ -152,11 +153,20 @@ async function openDetail(code) {
   for (const r of salesRows) {
     const key = r.customer_code;
     if (!key) continue;
-    if (!byCust[key]) byCust[key] = { name: r.customer_name, v: 0 };
+    if (!byCust[key]) byCust[key] = { name: r.customer_name, v: 0, qty: 0, last: r.sale_date, lastPrice: r.unit_price };
     byCust[key].v += Number(r.supply_amount) || 0;
+    byCust[key].qty += Number(r.qty) || 0;
+    if (r.sale_date > byCust[key].last) { byCust[key].last = r.sale_date; byCust[key].lastPrice = r.unit_price; }
   }
   const topCust = Object.values(byCust).sort((a, b) => b.v - a.v).slice(0, 8);
   const mxCust = topCust.length ? topCust[0].v : 1;
+
+  // 거래처별 판매단가 — 같은 품목을 거래처마다 얼마에 파는지 한눈에 비교
+  const priceRows = Object.values(byCust).map((c) => ({ ...c, avgPrice: c.qty ? c.v / c.qty : 0 })).sort((a, b) => b.avgPrice - a.avgPrice);
+  const priceVals = priceRows.map((c) => c.avgPrice).filter((v) => v > 0);
+  const priceMax = priceVals.length ? Math.max(...priceVals) : 0;
+  const priceMin = priceVals.length ? Math.min(...priceVals) : 0;
+  const priceSpreadPct = priceMin > 0 ? ((priceMax - priceMin) / priceMin) * 100 : 0;
 
   const body = `
     <div class="tile-row">
@@ -169,6 +179,12 @@ async function openDetail(code) {
     <div style="height:120px"><canvas id="prod-trend-chart"></canvas></div>
     <div class="dsec">거래처별 판매 TOP 8</div>
     ${topCust.length ? topCust.map((c) => `<div class="rank-item"><div class="rank-row"><span class="rn">${esc(c.name)}</span><span class="rv">${fmtWon(c.v)}</span></div><div class="rank-bar"><i style="width:${(c.v / mxCust * 100).toFixed(1)}%;background:#2563eb"></i></div></div>`).join("") : '<div class="empty-state">거래 내역이 없습니다.</div>'}
+
+    <div class="dsec">거래처별 판매단가 비교 ${priceVals.length > 1 ? `<span style="color:${priceSpreadPct > 20 ? "var(--red)" : "var(--text-2)"};text-transform:none;font-weight:600">최고-최저 단가차 ${priceSpreadPct.toFixed(0)}%</span>` : ""}</div>
+    <div class="table-wrap"><table class="wt-tbl">
+      <thead><tr><th class="l">거래처</th><th>누적수량</th><th>평균단가</th><th>최근단가</th><th class="l">최근구매일</th></tr></thead>
+      <tbody>${priceRows.map((c) => `<tr><td class="l nm">${esc(c.name)}</td><td>${fmtNum(c.qty)}</td><td style="${c.avgPrice === priceMax && priceMax !== priceMin ? "color:var(--red);font-weight:700" : c.avgPrice === priceMin && priceMax !== priceMin ? "color:var(--green);font-weight:700" : ""}">${fmtNum(c.avgPrice)}</td><td>${fmtNum(c.lastPrice)}</td><td class="l">${c.last}</td></tr>`).join("") || '<tr><td colspan="5" class="empty-state">거래 내역이 없습니다.</td></tr>'}</tbody>
+    </table></div>
   `;
   openModal(`<i class="bi bi-box-seam"></i> ${esc(name)} <span style="font-size:12px;color:var(--mut);font-weight:500">${esc(spec || "")}</span>`, body, true);
 
@@ -186,7 +202,7 @@ async function openDetail(code) {
 
   const [profitRows, salesRows, { data: latestSnap }] = await Promise.all([
     fetchAllRows((from, to) => sb.from("profit_daily").select("profit_date,product_code,product_name,spec,qty,sales_amount,profit_amount").range(from, to)),
-    fetchAllRows((from, to) => sb.from("sales").select("customer_code,customer_name,product_code,supply_amount").range(from, to)),
+    fetchAllRows((from, to) => sb.from("sales").select("customer_code,customer_name,product_code,qty,unit_price,supply_amount,sale_date").range(from, to)),
     sb.from("inventory_snapshots").select("snapshot_date").order("snapshot_date", { ascending: false }).limit(1),
   ]);
   ALL_PROFIT = profitRows;
@@ -211,6 +227,7 @@ async function openDetail(code) {
   });
 
   render();
+  attachDatalist(document.getElementById("search"), [...new Set(ALL_PROFIT.map((r) => r.product_name).filter(Boolean))]);
 
   const code = new URLSearchParams(location.search).get("code");
   if (code) openDetail(code);

@@ -70,6 +70,11 @@
     </div>
   </div>
 
+  <div class="panel">
+    <div class="wt-st"><i class="bi bi-kanban"></i>영업 활동 현황<span class="hint">수주관리·일정 연동</span></div>
+    <div class="stat-strip" id="crm-strip"></div>
+  </div>
+
   <div class="wt-grid g-3" id="action-cards">
     <div class="panel">
       <div class="wt-st"><i class="bi bi-exclamation-triangle" style="color:var(--red)"></i>이탈 위험 거래처<span class="hint">45일+ 거래 없음</span></div>
@@ -570,6 +575,25 @@ function renderStockAlert() {
     : '<li class="empty-state">소진 임박 품목이 없습니다.</li>';
 }
 
+async function renderCrmStrip() {
+  const [{ data: deals }, { data: acts }] = await Promise.all([
+    sb.from("deals").select("stage,expected_amount"),
+    sb.from("activities").select("next_action_date,done"),
+  ]);
+  const today = todayISO();
+  const open = (deals || []).filter((d) => !["완료", "실주"].includes(d.stage));
+  const openAmt = open.reduce((a, d) => a + (Number(d.expected_amount) || 0), 0);
+  const overdue = (acts || []).filter((a) => !a.done && a.next_action_date && a.next_action_date < today).length;
+  const todayCount = (acts || []).filter((a) => !a.done && a.next_action_date === today).length;
+  document.getElementById("crm-strip").innerHTML = `
+    <a href="deals.html" class="st" style="text-decoration:none;color:inherit"><div class="n">${fmtNum(open.length)}</div><div class="l">진행중 수주</div></a>
+    <a href="deals.html" class="st" style="text-decoration:none;color:inherit"><div class="n">${fmtWon(openAmt)}</div><div class="l">진행중 예상금액</div></a>
+    <a href="schedule.html" class="st" style="text-decoration:none;color:inherit"><div class="n" style="color:${todayCount ? "var(--amber)" : "inherit"}">${fmtNum(todayCount)}</div><div class="l">오늘 처리할 액션</div></a>
+    <a href="schedule.html" class="st" style="text-decoration:none;color:inherit"><div class="n" style="color:${overdue ? "var(--red)" : "inherit"}">${fmtNum(overdue)}</div><div class="l">지연된 액션</div></a>
+  `;
+}
+function todayISO() { return new Date().toISOString().slice(0, 10); }
+
 function renderMarginAlert() {
   if (!LATEST_DATE) return;
   const curM = { y: LATEST_DATE.getFullYear(), m: LATEST_DATE.getMonth() + 1 };
@@ -656,6 +680,7 @@ function renderAll() {
   renderChurnRisk();
   renderStockAlert();
   renderMarginAlert();
+  renderCrmStrip();
 
   const minYear = Math.min(...ALL_PROFIT.map((r) => new Date(r.profit_date).getFullYear()));
   PERIOD = createPeriodCtrl(document.getElementById("period-host"), {

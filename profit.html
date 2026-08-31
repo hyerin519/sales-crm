@@ -204,6 +204,9 @@ document.getElementById("next-btn").addEventListener("click", () => { page++; lo
 
   loadTable();
   loadMonthlyChart();
+
+  const products = await fetchProductList();
+  attachDatalist(document.getElementById("f-product"), [...new Set(products.map((p) => p.name))]);
 })();
 </script>
 </body>

@@ -26,7 +26,7 @@ a{color:var(--blue)}
 #sidebar .su-box button:hover{background:var(--hover);border-color:var(--lemon-2);color:var(--gold-text)}
 
 #app-main{margin-left:var(--sidebar-w);min-height:100vh}
-.page{max-width:1240px;margin:0 auto;padding:22px 26px 60px}
+.page{max-width:1560px;margin:0 auto;padding:16px 22px 40px}
 @media(max-width:900px){
   :root{--sidebar-w:0px}
   #sidebar{transform:translateX(-100%);transition:transform .18s;width:230px;z-index:500}
@@ -36,21 +36,22 @@ a{color:var(--blue)}
 }
 #mnav-toggle{display:none;position:fixed;top:12px;left:12px;z-index:400;background:#fff;border:1px solid var(--border);border-radius:8px;width:36px;height:36px;align-items:center;justify-content:center;cursor:pointer}
 
-.page-header{display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:8px;border-bottom:2px solid var(--navy);padding-bottom:14px;margin-bottom:18px}
-.page-kick{font-size:11px;font-weight:800;letter-spacing:.14em;color:var(--mut);text-transform:uppercase}
-.page-title{font-size:22px;font-weight:800;color:var(--ink);letter-spacing:-.01em;margin:4px 0 0;display:flex;align-items:center;gap:9px}
-.page-title i{color:var(--blue);font-size:20px}
-.page-sub{color:var(--text-2);margin:0;font-size:12.5px;text-align:right}
+.page-header{display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:8px;border-bottom:2px solid var(--navy);padding-bottom:10px;margin-bottom:12px}
+.page-kick{font-size:10.5px;font-weight:800;letter-spacing:.14em;color:var(--mut);text-transform:uppercase}
+.page-title{font-size:19px;font-weight:800;color:var(--ink);letter-spacing:-.01em;margin:3px 0 0;display:flex;align-items:center;gap:8px}
+.page-title i{color:var(--blue);font-size:18px}
+.page-sub{color:var(--text-2);margin:0;font-size:12px;text-align:right}
 
 /* ── 카드/섹션 ── */
-.panel,.wt-card{background:#fff;border:1px solid var(--border);border-radius:14px;padding:16px 18px;margin-bottom:18px;min-width:0}
-.wt-st{font-size:14px;font-weight:800;color:var(--ink);padding-bottom:8px;border-bottom:2px solid var(--navy);margin-bottom:13px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.wt-st i{color:var(--blue);font-size:15px}
-.wt-st .hint{margin-left:auto;font-size:11px;font-weight:500;color:var(--mut)}
+.panel,.wt-card{background:#fff;border:1px solid var(--border);border-radius:12px;padding:13px 16px;margin-bottom:12px;min-width:0}
+.wt-st{font-size:13px;font-weight:800;color:var(--ink);padding-bottom:7px;border-bottom:2px solid var(--navy);margin-bottom:10px;display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.wt-st i{color:var(--blue);font-size:14px}
+.wt-st .hint{margin-left:auto;font-size:10.5px;font-weight:500;color:var(--mut)}
 
-.wt-grid{display:grid;gap:16px}
+.wt-grid{display:grid;gap:12px}
 .g-2{grid-template-columns:1fr 1fr}.g-3{grid-template-columns:repeat(3,1fr)}
-@media(max-width:900px){.g-2,.g-3{grid-template-columns:1fr}}
+.g-32{grid-template-columns:1.7fr 1fr}
+@media(max-width:900px){.g-2,.g-3,.g-32{grid-template-columns:1fr}}
 
 /* ── 조회기간 컨트롤 ── */
 .pl{font-size:12px;font-weight:600;color:#374151;white-space:nowrap}
@@ -62,20 +63,35 @@ a{color:var(--blue)}
 .period-asof{margin-left:auto;font-size:11.5px;color:var(--mut);font-weight:600;white-space:nowrap}
 
 /* ── 4칸 KPI 요약(당월/전월/누계 등) ── */
-.sb{background:linear-gradient(135deg,#eef5ff 0%,#f7fbff 55%,#eafaf6 130%);border-radius:16px;padding:17px 22px 15px;color:#1c2534;margin-bottom:18px;box-shadow:0 8px 24px rgba(15,23,42,.10)}
-.sb-head{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:12px;flex-wrap:wrap}
+.sb{background:linear-gradient(135deg,#eef5ff 0%,#f7fbff 55%,#eafaf6 130%);border-radius:14px;padding:13px 18px 12px;color:#1c2534;margin-bottom:12px;box-shadow:0 6px 18px rgba(15,23,42,.09)}
+.sb-head{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:8px;flex-wrap:wrap}
 .sb-title{font-size:12px;font-weight:700;color:#5b7591;letter-spacing:.04em}
 .sb-note{font-size:11px;color:#5b7591}
-.sb-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:0}
-.sb-cell{padding:2px 16px 0;border-left:1px solid rgba(15,42,67,.1);min-width:0;cursor:pointer;border-radius:8px;transition:background .12s}
+.sb-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:0}
+.sb-cell{padding:2px 14px 0;border-left:1px solid rgba(15,42,67,.1);min-width:0;cursor:pointer;border-radius:8px;transition:background .12s}
 .sb-cell:first-child{border-left:none;padding-left:2px}
 .sb-cell:hover{background:rgba(255,255,255,.55)}
 .sb-l{font-size:11.5px;font-weight:700;color:#5b7591;display:flex;align-items:center;gap:5px}
-.sb-v{font-size:24px;font-weight:800;color:var(--ink);line-height:1.15;margin-top:3px;font-variant-numeric:tabular-nums}
+.sb-v{font-size:22px;font-weight:800;color:var(--ink);line-height:1.15;margin-top:3px;font-variant-numeric:tabular-nums}
 .sb-sub{font-size:11px;color:#64748b;margin-top:3px}
 .sb-badge{font-weight:700}
 .sb-badge.up{color:var(--green)}.sb-badge.down{color:var(--red)}
-@media(max-width:900px){.sb-grid{grid-template-columns:repeat(2,1fr);row-gap:14px}.sb-cell:nth-child(3){border-left:none}}
+@media(max-width:1100px){.sb-grid{grid-template-columns:repeat(3,1fr);row-gap:14px}.sb-cell:nth-child(3n+1){border-left:none}}
+@media(max-width:640px){.sb-grid{grid-template-columns:repeat(2,1fr)}.sb-cell:nth-child(odd){border-left:none}}
+
+/* ── 분기 비교 표 ── */
+.qtr-tbl{width:100%;border-collapse:collapse;font-size:12.5px}
+.qtr-tbl th,.qtr-tbl td{padding:8px 10px;text-align:right;border-bottom:1px solid var(--line)}
+.qtr-tbl th{color:var(--text-2);font-size:11px;font-weight:700;background:#fafbfc}
+.qtr-tbl td.l,.qtr-tbl th.l{text-align:left}
+.qtr-tbl tr.tot td{font-weight:800;border-top:2px solid var(--navy);border-bottom:none;color:var(--ink)}
+.qtr-tbl .chg.up{color:var(--green);font-weight:700}
+.qtr-tbl .chg.down{color:var(--red);font-weight:700}
+
+/* ── 성장/하락 랭킹 ── */
+.mover-cols{display:grid;grid-template-columns:1fr 1fr;gap:0 20px}
+@media(max-width:760px){.mover-cols{grid-template-columns:1fr}}
+.mover-title{font-size:12px;font-weight:700;margin-bottom:6px;display:flex;align-items:center;gap:5px}
 
 .kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;margin-bottom:18px}
 .kpi-card{background:#fff;border:1px solid var(--border);border-radius:14px;padding:16px 18px}
@@ -86,7 +102,7 @@ a{color:var(--blue)}
 
 /* ── 액션 카드(이탈위험/재고소진/마진악화) ── */
 .act-list{list-style:none;margin:0;padding:0}
-.act-item{display:flex;align-items:center;gap:10px;padding:9px 4px;border-bottom:1px solid var(--line);cursor:pointer}
+.act-item{display:flex;align-items:center;gap:10px;padding:6px 4px;border-bottom:1px solid var(--line);cursor:pointer}
 .act-item:last-child{border-bottom:none}
 .act-item:hover{background:#fefce8}
 .act-item .rk{width:20px;color:var(--mut);font-weight:700;font-size:12px;text-align:center;flex-shrink:0}
@@ -111,7 +127,7 @@ a{color:var(--blue)}
 .tile .s{font-size:10px;color:var(--mut);margin-top:1px}
 
 /* ── 필터 툴바 ── */
-.wt-tools{display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:#fff;border:1px solid var(--border);border-radius:12px;padding:11px 14px;margin-bottom:18px}
+.wt-tools{display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:#fff;border:1px solid var(--border);border-radius:11px;padding:9px 13px;margin-bottom:12px}
 .field{display:flex;flex-direction:column;gap:4px}
 .field label{font-size:11px;font-weight:700;color:var(--text-2)}
 .form-row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px}
@@ -128,10 +144,10 @@ button:disabled{opacity:.5;cursor:not-allowed}
 /* ── 표 ── */
 .table-wrap{overflow-x:auto}
 table.wt-tbl{width:100%;border-collapse:collapse;font-size:12.5px;font-variant-numeric:tabular-nums}
-.wt-tbl thead th{background:#fafbfc;color:#475569;font-size:11.5px;font-weight:700;border-top:2px solid var(--navy);border-bottom:1px solid var(--border);padding:8px 10px;text-align:right;white-space:nowrap;position:sticky;top:0;cursor:pointer;user-select:none}
+.wt-tbl thead th{background:#fafbfc;color:#475569;font-size:11px;font-weight:700;border-top:2px solid var(--navy);border-bottom:1px solid var(--border);padding:6px 10px;text-align:right;white-space:nowrap;position:sticky;top:0;cursor:pointer;user-select:none}
 .wt-tbl thead th.l{text-align:left}
 .wt-tbl thead th:hover{color:var(--gold-text);background:var(--lemon)}
-.wt-tbl tbody td{border-bottom:1px solid var(--line);padding:8px 10px;text-align:right;white-space:nowrap;color:var(--text)}
+.wt-tbl tbody td{border-bottom:1px solid var(--line);padding:6px 10px;text-align:right;white-space:nowrap;color:var(--text)}
 .wt-tbl tbody td.l{text-align:left}
 .wt-tbl tbody tr{cursor:default}
 .wt-tbl tbody tr.clk{cursor:pointer}
@@ -176,7 +192,36 @@ table.wt-tbl{width:100%;border-collapse:collapse;font-size:12.5px;font-variant-n
 
 .empty-state,.empty{text-align:center;padding:40px 0;color:var(--mut);font-size:13px}
 
-.chart-wrap{height:280px}
+.chart-wrap{height:240px}
+.chart-wrap.sm{height:190px}
+.chart-wrap.lg{height:320px}
+
+/* ── 경영진 요약 인사이트 ── */
+.insight-panel{background:linear-gradient(135deg,#182230 0%,#20344f 100%);border-radius:14px;padding:14px 20px;margin-bottom:12px;color:#fff}
+.insight-panel .wt-st{color:#fff;border-bottom-color:rgba(255,255,255,.18);margin-bottom:8px}
+.insight-panel .wt-st i{color:#7db4ff}
+.insight-panel .hint{color:#93a3ba}
+.insight-grid{display:grid;grid-template-columns:1fr 1fr;gap:2px 24px}
+@media(max-width:900px){.insight-grid{grid-template-columns:1fr}}
+.insight-item{display:flex;align-items:flex-start;gap:8px;padding:5px 2px;font-size:12.5px;line-height:1.5;color:#e2e8f0}
+.insight-item .dot{width:7px;height:7px;border-radius:50%;margin-top:6px;flex-shrink:0}
+.insight-item .dot.up{background:#4ade80}
+.insight-item .dot.down{background:#f87171}
+.insight-item .dot.warn{background:#fbbf24}
+.insight-item .dot.info{background:#7db4ff}
+.insight-item b{color:#fff}
+
+/* ── 통계 스트립(신규/유지/이탈 등) ── */
+.stat-strip{display:flex;gap:0}
+.stat-strip .st{flex:1;text-align:center;padding:6px 4px;border-right:1px solid var(--line)}
+.stat-strip .st:last-child{border-right:none}
+.stat-strip .st .n{font-size:19px;font-weight:800;color:var(--ink);line-height:1.2}
+.stat-strip .st .l{font-size:10.5px;color:var(--text-2);font-weight:600;margin-top:2px}
+
+/* ── 파레토(매출 집중도) ── */
+.pareto-row{display:flex;justify-content:space-between;align-items:center;padding:6px 2px;font-size:12.5px;border-bottom:1px solid var(--line)}
+.pareto-row:last-child{border-bottom:none}
+.pareto-row .pv{font-size:17px;font-weight:800;color:var(--ink)}
 
 /* ── 모달 ── */
 .modal-bg{position:fixed;inset:0;background:rgba(16,42,67,.42);display:none;align-items:center;justify-content:center;z-index:8000;padding:16px}

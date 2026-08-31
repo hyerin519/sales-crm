@@ -21,19 +21,27 @@
     </div>
     <div class="page-sub" id="count-label"></div>
   </div>
-  <p class="hint" style="margin:-10px 0 16px">판매일보 기준 자동 생성된 거래처 목록입니다 (누적 매출액 = 공급가액 기준). 담당자·연락처는 직접 입력해서 보완하세요. 행을 클릭하면 상세 실적과 거래 내역을 볼 수 있습니다.</p>
+  <p class="hint" style="margin:-6px 0 12px">판매일보 기준 자동 생성된 거래처 목록입니다 (누적 매출액 = 공급가액 기준). 담당자·연락처는 직접 입력해서 보완하세요. 행을 클릭하면 상세 실적과 거래 내역을 볼 수 있습니다.</p>
+
+  <div class="kpi-grid" id="kpi-strip"></div>
 
   <div class="wt-tools">
-    <span class="pl" style="font-size:12px;font-weight:600;color:#374151">검색</span>
-    <input id="search" placeholder="거래처명 또는 코드" style="width:240px" />
+    <span class="pl">검색</span>
+    <input id="search" placeholder="거래처명 또는 코드" style="width:220px" />
+    <span class="pl" style="margin-left:6px">세그먼트</span>
+    <select id="segment-filter">
+      <option value="">전체</option>
+      <option value="active">활성 (45일 이내 거래)</option>
+      <option value="dormant">휴면 (45일 이상 무거래)</option>
+    </select>
     <button id="search-btn" class="primary">검색</button>
   </div>
 
   <div class="panel">
     <div class="table-wrap">
       <table class="wt-tbl">
-        <thead><tr><th class="rk"></th><th class="l">거래처명</th><th class="l">담당자</th><th class="l">연락처</th><th>거래건수</th><th>최근거래일</th><th>누적매출액</th></tr></thead>
-        <tbody id="cust-body"><tr><td colspan="7" class="empty-state">불러오는 중...</td></tr></tbody>
+        <thead><tr><th class="rk"></th><th class="l">거래처명</th><th class="l">세그먼트</th><th class="l">담당자</th><th class="l">연락처</th><th data-k="count">거래건수</th><th data-k="last">최근거래일</th><th data-k="amount">누적매출액</th><th>매출비중</th></tr></thead>
+        <tbody id="cust-body"><tr><td colspan="9" class="empty-state">불러오는 중...</td></tr></tbody>
       </table>
     </div>
   </div>
@@ -42,6 +50,10 @@
 <script>
 let ALL_SALES = [];
 let keyword = "";
+let segmentFilter = "";
+let sortKey = "amount";
+let sortDir = -1;
+let LATEST_DATE = null;
 
 async function loadAll() {
   const [{ data: customers }, sales] = await Promise.all([
@@ -50,6 +62,22 @@ async function loadAll() {
   ]);
   ALL_SALES = sales;
   return customers || [];
+}
+
+function renderKpiStrip(rows, totalAmount) {
+  const active = rows.filter((c) => c.segment === "active").length;
+  const avg = rows.length ? totalAmount / rows.length : 0;
+  const sorted = rows.slice().sort((a, b) => b.amount - a.amount);
+  const top20 = Math.max(1, Math.ceil(sorted.length * 0.2));
+  const top20Sum = sorted.slice(0, top20).reduce((a, c) => a + c.amount, 0);
+  const concPct = totalAmount ? (top20Sum / totalAmount) * 100 : 0;
+
+  document.getElementById("kpi-strip").innerHTML = `
+    <div class="kpi-card"><div class="label">총 거래처</div><div class="value">${fmtNum(rows.length)}</div></div>
+    <div class="kpi-card"><div class="label">활성 거래처 (45일 이내)</div><div class="value pos">${fmtNum(active)}</div></div>
+    <div class="kpi-card"><div class="label">거래처당 평균 누적매출</div><div class="value">${fmtWon(avg)}</div></div>
+    <div class="kpi-card"><div class="label">상위 20% 매출 집중도</div><div class="value ${concPct >= 75 ? "neg" : ""}">${concPct.toFixed(0)}%</div></div>
+  `;
 }
 
 function renderTable(customers) {
@@ -66,11 +94,20 @@ function renderTable(customers) {
   }
 
   let rows = customers.map((c) => ({ ...c, ...(agg[c.code] || { count: 0, amount: 0, last: null }) }));
+  rows.forEach((c) => { c.segment = c.last && LATEST_DATE && Math.round((LATEST_DATE - c.last) / 86400000) < 45 ? "active" : "dormant"; });
+
+  const totalAmount = rows.reduce((a, c) => a + c.amount, 0);
+  renderKpiStrip(rows, totalAmount);
+
+  if (segmentFilter) rows = rows.filter((c) => c.segment === segmentFilter);
   if (keyword) {
     const kw = keyword.toLowerCase();
     rows = rows.filter((c) => (c.name || "").toLowerCase().includes(kw) || (c.code || "").toLowerCase().includes(kw));
   }
-  rows.sort((a, b) => b.amount - a.amount);
+  rows.sort((a, b) => {
+    if (sortKey === "last") return sortDir * (((a.last && a.last.getTime()) || 0) - ((b.last && b.last.getTime()) || 0));
+    return sortDir * ((a[sortKey] || 0) - (b[sortKey] || 0));
+  });
 
   document.getElementById("count-label").textContent = `총 ${fmtNum(rows.length)}개 거래처`;
 
@@ -79,14 +116,28 @@ function renderTable(customers) {
       <tr class="clk" onclick="openDetail('${esc(c.code)}')">
         <td class="rk">${i + 1}</td>
         <td class="l nm">${esc(c.name)}</td>
+        <td class="l">${c.segment === "active" ? '<span class="badge-st ok">활성</span>' : '<span class="badge-st mut">휴면</span>'}</td>
         <td class="l">${c.manager ? esc(c.manager) : '<span class="mut">-</span>'}</td>
         <td class="l">${c.phone ? esc(c.phone) : '<span class="mut">-</span>'}</td>
         <td>${fmtNum(c.count)}</td>
         <td>${c.last ? c.last.toISOString().slice(0, 10) : "-"}</td>
         <td>${fmtWon(c.amount)}</td>
+        <td>${totalAmount ? (c.amount / totalAmount * 100).toFixed(1) : "0.0"}%</td>
       </tr>`).join("")
-    : '<tr><td colspan="7" class="empty-state">조건에 맞는 거래처가 없습니다.</td></tr>';
+    : '<tr><td colspan="9" class="empty-state">조건에 맞는 거래처가 없습니다.</td></tr>';
 }
+
+document.querySelectorAll("th[data-k]").forEach((th) => {
+  th.addEventListener("click", () => {
+    const k = th.dataset.k;
+    if (sortKey === k) sortDir *= -1; else { sortKey = k; sortDir = -1; }
+    renderTable(CUSTOMERS);
+  });
+});
+document.getElementById("segment-filter").addEventListener("change", (e) => {
+  segmentFilter = e.target.value;
+  renderTable(CUSTOMERS);
+});
 
 let CUSTOMERS = [];
 let detailChart = null;
@@ -173,6 +224,7 @@ document.getElementById("search").addEventListener("keydown", (e) => {
   const session = await requireAuth("customers");
   if (!session) return;
   CUSTOMERS = await loadAll();
+  LATEST_DATE = ALL_SALES.reduce((max, r) => { const d = new Date(r.sale_date); return !max || d > max ? d : max; }, null);
   renderTable(CUSTOMERS);
 
   const code = new URLSearchParams(location.search).get("code");

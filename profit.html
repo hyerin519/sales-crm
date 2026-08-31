@@ -24,8 +24,10 @@
 
   <div class="wt-tools" id="period-host"></div>
 
+  <div class="kpi-grid" id="kpi-strip"></div>
+
   <div class="panel">
-    <div class="wt-st"><i class="bi bi-bar-chart"></i>월별 매출 / 매출총이익<span class="hint">막대 클릭 시 해당 월 품목별 상세</span></div>
+    <div class="wt-st"><i class="bi bi-bar-chart"></i>월별 매출 / 매출총이익 (전년 비교)<span class="hint">막대=매출/매출총이익 · 점선=전년 동월 매출액 · 클릭 시 해당 월 상세</span></div>
     <div class="chart-wrap"><canvas id="monthly-chart"></canvas></div>
   </div>
 
@@ -98,8 +100,13 @@ async function loadTable() {
 
 async function loadMonthlyChart() {
   const p = PERIOD.get();
+  const prevP = { sy: p.sy - 1, sm: p.sm, ey: p.ey - 1, em: p.em };
   const { from, to } = periodToDates(p);
-  const { data } = await sb.from("profit_daily").select("profit_date, sales_amount, profit_amount").gte("profit_date", from).lte("profit_date", to);
+  const prevDates = periodToDates(prevP);
+  const [{ data }, { data: prevData }] = await Promise.all([
+    sb.from("profit_daily").select("profit_date, sales_amount, profit_amount").gte("profit_date", from).lte("profit_date", to),
+    sb.from("profit_daily").select("profit_date, sales_amount").gte("profit_date", prevDates.from).lte("profit_date", prevDates.to),
+  ]);
 
   const months = [];
   for (let y = p.sy, m = p.sm; y < p.ey || (y === p.ey && m <= p.em); m++) {
@@ -113,15 +120,32 @@ async function loadMonthlyChart() {
     byMonth[m].sales += Number(r.sales_amount) || 0;
     byMonth[m].profit += Number(r.profit_amount) || 0;
   }
+  const byMonthPrev = {};
+  for (const r of prevData || []) {
+    const m = r.profit_date.slice(0, 7);
+    byMonthPrev[m] = (byMonthPrev[m] || 0) + (Number(r.sales_amount) || 0);
+  }
   const sales = months.map((m) => (byMonth[m] ? byMonth[m].sales : 0));
   const profit = months.map((m) => (byMonth[m] ? byMonth[m].profit : 0));
+  const prevYearSales = months.map((m) => { const [y, mm] = m.split("-").map(Number); const key = `${y - 1}-${String(mm).padStart(2, "0")}`; return byMonthPrev[key] || 0; });
+
+  const totalSales = sales.reduce((a, v) => a + v, 0), totalProfit = profit.reduce((a, v) => a + v, 0);
+  const totalPrevSales = prevYearSales.reduce((a, v) => a + v, 0);
+  const yoy = totalPrevSales ? (totalSales / totalPrevSales - 1) * 100 : null;
+  document.getElementById("kpi-strip").innerHTML = `
+    <div class="kpi-card"><div class="label">매출액 (선택 기간)</div><div class="value">${fmtWon(totalSales)}</div></div>
+    <div class="kpi-card"><div class="label">매출총이익</div><div class="value">${fmtWon(totalProfit)}</div></div>
+    <div class="kpi-card"><div class="label">이익률</div><div class="value">${totalSales ? fmtPct(totalProfit / totalSales * 100) : "-"}</div></div>
+    <div class="kpi-card"><div class="label">전년동기 대비</div><div class="value ${yoy === null ? "" : yoy >= 0 ? "pos" : "neg"}">${yoy === null ? "-" : (yoy >= 0 ? "▲" : "▼") + Math.abs(yoy).toFixed(1) + "%"}</div></div>
+  `;
 
   if (monthlyChart) monthlyChart.destroy();
   monthlyChart = new Chart(document.getElementById("monthly-chart"), {
     type: "bar",
     data: { labels: months.map((m) => m.slice(2)), datasets: [
-      { label: "매출액", data: sales, backgroundColor: "#2563eb" },
-      { label: "매출총이익", data: profit, backgroundColor: "#15803d" },
+      { label: "매출액", data: sales, backgroundColor: "#2563eb", order: 2 },
+      { label: "매출총이익", data: profit, backgroundColor: "#15803d", order: 2 },
+      { label: "전년 동월 매출액", data: prevYearSales, type: "line", borderColor: "#94a3b8", borderDash: [5, 4], backgroundColor: "transparent", order: 1, pointRadius: 0, borderWidth: 1.5 },
     ]},
     options: {
       maintainAspectRatio: false,

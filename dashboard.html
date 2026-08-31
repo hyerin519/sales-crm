@@ -24,14 +24,50 @@
 
   <div class="wt-tools" id="period-host"></div>
 
+  <div class="insight-panel">
+    <div class="wt-st"><i class="bi bi-stars"></i>경영 요약<span class="hint" id="insight-note"></span></div>
+    <div class="insight-grid" id="insight-list"></div>
+  </div>
+
   <div class="sb" id="kpi-band" style="display:none">
     <div class="sb-head"><span class="sb-title"><i class="bi bi-lightning-charge-fill me-1"></i>선택 기간 실적</span><span class="sb-note" id="sb-note"></span></div>
     <div class="sb-grid" id="sb-grid"></div>
   </div>
 
+  <div class="wt-grid g-32">
+    <div class="panel">
+      <div class="wt-st"><i class="bi bi-graph-up-arrow"></i>월별 매출 추이 (전년 비교)<span class="hint">막대=선택기간 · 점선=전년 동월 · 클릭 시 상세</span></div>
+      <div class="chart-wrap"><canvas id="trend-chart"></canvas></div>
+    </div>
+    <div class="wt-grid" style="gap:12px">
+      <div class="panel" style="margin-bottom:0">
+        <div class="wt-st"><i class="bi bi-people"></i>거래처 증감<span class="hint" id="cust-flow-note"></span></div>
+        <div class="stat-strip" id="cust-flow-strip"></div>
+      </div>
+      <div class="panel" style="margin-bottom:0">
+        <div class="wt-st"><i class="bi bi-pie-chart"></i>매출 집중도<span class="hint">쏠림 위험 체크</span></div>
+        <div id="concentration-body"></div>
+      </div>
+    </div>
+  </div>
+
   <div class="panel">
-    <div class="wt-st"><i class="bi bi-graph-up-arrow"></i>월별 매출 · 매출총이익 추이<span class="hint">막대 클릭 시 해당 월 상세</span></div>
-    <div class="chart-wrap"><canvas id="trend-chart"></canvas></div>
+    <div class="wt-st"><i class="bi bi-calendar3-range"></i>분기별 실적 비교<span class="hint" id="qtr-years"></span></div>
+    <div class="table-wrap"><table class="qtr-tbl" id="qtr-table"></table></div>
+  </div>
+
+  <div class="wt-grid g-2">
+    <div class="panel">
+      <div class="wt-st"><i class="bi bi-arrow-left-right"></i>전년동기 대비 급성장 · 급감 품목<span class="hint">매출 규모 있는 품목만</span></div>
+      <div class="mover-cols">
+        <div><div class="mover-title" style="color:var(--green)"><i class="bi bi-graph-up-arrow"></i>급성장 TOP 5</div><div id="movers-up"></div></div>
+        <div><div class="mover-title" style="color:var(--red)"><i class="bi bi-graph-down-arrow"></i>급감 TOP 5</div><div id="movers-down"></div></div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="wt-st"><i class="bi bi-geo-alt"></i>창고별 매출 비중 (선택 기간)<span class="hint">출고 창고 기준</span></div>
+      <div id="warehouse-body"></div>
+    </div>
   </div>
 
   <div class="wt-grid g-3" id="action-cards">
@@ -50,8 +86,19 @@
   </div>
 
   <div class="panel">
-    <div class="wt-st"><i class="bi bi-trophy"></i>품목별 매출 TOP 10 (선택 기간)<span class="hint">클릭 시 품목 상세</span></div>
-    <div id="top-products"><div class="empty-state">불러오는 중...</div></div>
+    <div class="wt-st"><i class="bi bi-grid-3x3-gap"></i>거래처 포트폴리오 매트릭스<span class="hint">가로=선택기간 매출액(로그축) · 세로=전년대비 성장률 · 원 크기=매출총이익 · 점 클릭 시 거래처 상세</span></div>
+    <div class="chart-wrap lg"><canvas id="matrix-chart"></canvas></div>
+  </div>
+
+  <div class="wt-grid g-2">
+    <div class="panel">
+      <div class="wt-st"><i class="bi bi-trophy"></i>품목별 매출 TOP 10 (선택 기간)<span class="hint">클릭 시 품목 상세</span></div>
+      <div id="top-products"><div class="empty-state">불러오는 중...</div></div>
+    </div>
+    <div class="panel">
+      <div class="wt-st"><i class="bi bi-building"></i>거래처별 매출 TOP 10 (선택 기간)<span class="hint">클릭 시 거래처 상세</span></div>
+      <div id="top-customers"><div class="empty-state">불러오는 중...</div></div>
+    </div>
   </div>
 </div>
 
@@ -77,34 +124,273 @@ function rankListHtml(rows, accentColor, linkFn) {
     </a>`).join("");
 }
 
-function renderKpiBand() {
+/* ── 기간 컨텍스트: 페이지 곳곳에서 공용으로 쓰는 집계를 한 번에 계산 ── */
+function computeContext() {
   const p = PERIOD.get();
-  const rows = ALL_PROFIT.filter((r) => inPeriod(r.profit_date, p));
-  const sales = rows.reduce((a, r) => a + (Number(r.sales_amount) || 0), 0);
-  const cost = rows.reduce((a, r) => a + (Number(r.cost_amount) || 0), 0);
-  const profit = rows.reduce((a, r) => a + (Number(r.profit_amount) || 0), 0);
-  const rate = sales ? (profit / sales) * 100 : 0;
-
   const prevP = shiftYear(p, -1);
+  const rows = ALL_PROFIT.filter((r) => inPeriod(r.profit_date, p));
   const prevRows = ALL_PROFIT.filter((r) => inPeriod(r.profit_date, prevP));
-  const prevSales = prevRows.reduce((a, r) => a + (Number(r.sales_amount) || 0), 0);
-  const prevProfit = prevRows.reduce((a, r) => a + (Number(r.profit_amount) || 0), 0);
-  const salesYoy = prevSales ? (sales / prevSales - 1) * 100 : null;
-  const profitYoy = prevProfit ? (profit / prevProfit - 1) * 100 : null;
+  const salesRowsP = ALL_SALES.filter((r) => inPeriod(r.sale_date, p));
+  const salesRowsPrevP = ALL_SALES.filter((r) => inPeriod(r.sale_date, prevP));
+
+  const sum = (list, f) => list.reduce((a, r) => a + (Number(r[f]) || 0), 0);
+  const sales = sum(rows, "sales_amount"), qty = sum(rows, "qty"), profit = sum(rows, "profit_amount");
+  const prevSales = sum(prevRows, "sales_amount"), prevQty = sum(prevRows, "qty"), prevProfit = sum(prevRows, "profit_amount");
+  const rate = sales ? (profit / sales) * 100 : 0;
   const prevRate = prevSales ? (prevProfit / prevSales) * 100 : null;
 
-  const custSet = new Set(ALL_SALES.filter((r) => inPeriod(r.sale_date, p)).map((r) => r.customer_code).filter(Boolean));
+  const custSet = new Set(salesRowsP.map((r) => r.customer_code).filter(Boolean));
+  const prevCustSet = new Set(salesRowsPrevP.map((r) => r.customer_code).filter(Boolean));
 
-  document.getElementById("sb-note").textContent = `${p.sy}.${String(p.sm).padStart(2, "0")} ~ ${p.ey}.${String(p.em).padStart(2, "0")} · 전년 동기간 대비`;
+  return { p, prevP, rows, prevRows, salesRowsP, salesRowsPrevP, sales, qty, profit, prevSales, prevQty, prevProfit, rate, prevRate, custSet, prevCustSet };
+}
+
+function periodLabel(p) { return `${p.sy}.${String(p.sm).padStart(2, "0")}~${p.ey}.${String(p.em).padStart(2, "0")}`; }
+
+function renderKpiBand(ctx) {
+  const { p, prevP, sales, qty, profit, prevSales, prevQty, prevProfit, rate, prevRate, custSet, prevCustSet, prevRows } = ctx;
+  const salesYoy = prevSales ? (sales / prevSales - 1) * 100 : null;
+  const qtyYoy = prevQty ? (qty / prevQty - 1) * 100 : null;
+  const profitYoy = prevProfit ? (profit / prevProfit - 1) * 100 : null;
+  const custYoy = prevCustSet.size ? (custSet.size / prevCustSet.size - 1) * 100 : null;
+
+  const havePrevData = prevRows.length > 0;
+  document.getElementById("sb-note").textContent = havePrevData
+    ? `${periodLabel(p)} · 전년 동기간(${periodLabel(prevP)}) 대비`
+    : `${periodLabel(p)} · 전년 동기간 데이터 없음`;
   document.getElementById("sb-grid").innerHTML = `
     <div class="sb-cell" onclick="openRankModal('sales')"><div class="sb-l"><i class="bi bi-cash-stack"></i>매출액 <span class="mut">›</span></div><div class="sb-v">${fmtWon(sales)}</div><div class="sb-sub">전년 ${fmtWon(prevSales)} ${yoyBadge(salesYoy)}</div></div>
+    <div class="sb-cell" onclick="openRankModal('qty')"><div class="sb-l"><i class="bi bi-boxes"></i>판매수량 <span class="mut">›</span></div><div class="sb-v">${fmtNum(qty)}</div><div class="sb-sub">전년 ${fmtNum(prevQty)} ${yoyBadge(qtyYoy)}</div></div>
     <div class="sb-cell" onclick="openRankModal('profit')"><div class="sb-l"><i class="bi bi-piggy-bank"></i>매출총이익 <span class="mut">›</span></div><div class="sb-v">${fmtWon(profit)}</div><div class="sb-sub">전년 ${fmtWon(prevProfit)} ${yoyBadge(profitYoy)}</div></div>
     <div class="sb-cell" onclick="openRankModal('rate')"><div class="sb-l"><i class="bi bi-percent"></i>이익률 <span class="mut">›</span></div><div class="sb-v">${fmtPct(rate)}</div><div class="sb-sub">전년 ${prevRate === null ? "-" : fmtPct(prevRate)}</div></div>
-    <div class="sb-cell" onclick="location.href='customers.html'"><div class="sb-l"><i class="bi bi-building"></i>거래 거래처 수 <span class="mut">›</span></div><div class="sb-v">${fmtNum(custSet.size)}</div><div class="sb-sub">기간 내 거래 발생</div></div>
+    <div class="sb-cell" onclick="location.href='customers.html'"><div class="sb-l"><i class="bi bi-building"></i>거래 거래처 수 <span class="mut">›</span></div><div class="sb-v">${fmtNum(custSet.size)}</div><div class="sb-sub">전년 ${fmtNum(prevCustSet.size)} ${yoyBadge(custYoy)}</div></div>
   `;
   document.getElementById("kpi-band").style.display = "";
+}
 
-  renderTopProducts(rows);
+/* ── 경영 요약: 숫자를 문장으로 ── */
+function renderInsights(ctx, movers, custFlow, conc, churnCount, stockCount) {
+  const { p, sales, prevSales, rate, prevRate, profit, prevProfit } = ctx;
+  const salesYoy = prevSales ? (sales / prevSales - 1) * 100 : null;
+  const items = [];
+
+  if (salesYoy !== null) {
+    items.push({ dot: salesYoy >= 0 ? "up" : "down", html: `선택 기간(${periodLabel(p)}) 매출액이 전년 동기 대비 <b>${salesYoy >= 0 ? "▲" : "▼"}${Math.abs(salesYoy).toFixed(1)}%</b> ${salesYoy >= 0 ? "성장했습니다" : "감소했습니다"}.` });
+  } else {
+    items.push({ dot: "info", html: `선택 기간 매출액은 <b>${fmtWon(sales)}</b>입니다. 전년 동기간 데이터가 없어 비교할 수 없습니다.` });
+  }
+  if (prevRate !== null) {
+    const d = rate - prevRate;
+    items.push({ dot: d >= 0 ? "up" : "down", html: `매출총이익률은 <b>${fmtPct(rate)}</b>로 전년 동기(${fmtPct(prevRate)}) 대비 <b>${Math.abs(d).toFixed(1)}%p</b> ${d >= 0 ? "개선" : "하락"}했습니다.` });
+  }
+  if (movers.up.length) {
+    const m = movers.up[0];
+    items.push({ dot: "up", html: `<b>${esc(m.name)}</b>이(가) 전년 동기 대비 <b>▲${m.pct.toFixed(0)}%</b> 성장해 가장 크게 성장한 품목입니다 (${fmtWon(m.prev)} → ${fmtWon(m.cur)}).` });
+  }
+  if (movers.down.length) {
+    const m = movers.down[0];
+    items.push({ dot: "down", html: `<b>${esc(m.name)}</b>은(는) 전년 동기 대비 <b>▼${Math.abs(m.pct).toFixed(0)}%</b> 감소해 가장 크게 하락한 품목입니다 (${fmtWon(m.prev)} → ${fmtWon(m.cur)}).` });
+  }
+  items.push({ dot: custFlow.new >= custFlow.churned ? "up" : "warn", html: `이번 기간 <b>신규 거래처 ${custFlow.new}곳</b>, <b>이탈 거래처 ${custFlow.churned}곳</b>이 발생했고, <b>${custFlow.retained}곳</b>은 계속 거래 중입니다.` });
+  if (conc.custPct !== null) {
+    items.push({ dot: conc.custPct >= 75 ? "warn" : "info", html: `상위 20% 거래처(${conc.custTopN}곳)가 전체 매출의 <b>${conc.custPct.toFixed(0)}%</b>를 차지합니다${conc.custPct >= 75 ? " — 소수 거래처 의존도가 높은 편입니다" : ""}.` });
+  }
+  if (churnCount > 0 || stockCount > 0) {
+    const parts = [];
+    if (churnCount > 0) parts.push(`이탈 위험 거래처 <b>${churnCount}곳</b>`);
+    if (stockCount > 0) parts.push(`재고 소진 임박 품목 <b>${stockCount}개</b>`);
+    items.push({ dot: "warn", html: `현재 ${parts.join(", ")}가 확인되어 점검이 필요합니다.` });
+  }
+
+  document.getElementById("insight-note").textContent = "선택 기간 기준 자동 생성";
+  document.getElementById("insight-list").innerHTML = items.map((it) => `<div class="insight-item"><span class="dot ${it.dot}"></span><span>${it.html}</span></div>`).join("");
+}
+
+function renderCustFlowUI(custFlow) {
+  document.getElementById("cust-flow-note").textContent = "전년 동기간 대비";
+  document.getElementById("cust-flow-strip").innerHTML = `
+    <div class="st"><div class="n" style="color:var(--green)">+${fmtNum(custFlow.new)}</div><div class="l">신규</div></div>
+    <div class="st"><div class="n">${fmtNum(custFlow.retained)}</div><div class="l">유지</div></div>
+    <div class="st"><div class="n" style="color:var(--red)">-${fmtNum(custFlow.churned)}</div><div class="l">이탈</div></div>
+  `;
+}
+
+function computeCustFlow(ctx) {
+  const news = [...ctx.custSet].filter((c) => !ctx.prevCustSet.has(c));
+  const retained = [...ctx.custSet].filter((c) => ctx.prevCustSet.has(c));
+  const churned = [...ctx.prevCustSet].filter((c) => !ctx.custSet.has(c));
+  return { new: news.length, retained: retained.length, churned: churned.length };
+}
+
+function topShare(entries) {
+  const sorted = entries.slice().sort((a, b) => b - a);
+  const total = sorted.reduce((a, x) => a + x, 0);
+  if (!sorted.length || total <= 0) return { pct: null, topN: 0 };
+  const topN = Math.max(1, Math.ceil(sorted.length * 0.2));
+  const topSum = sorted.slice(0, topN).reduce((a, x) => a + x, 0);
+  return { pct: (topSum / total) * 100, topN };
+}
+
+function computeConcentration(ctx) {
+  const custAgg = {};
+  for (const r of ctx.salesRowsP) { if (!r.customer_code) continue; custAgg[r.customer_code] = (custAgg[r.customer_code] || 0) + (Number(r.supply_amount) || 0); }
+  const prodAgg = {};
+  for (const r of ctx.rows) { if (!r.product_code) continue; prodAgg[r.product_code] = (prodAgg[r.product_code] || 0) + (Number(r.sales_amount) || 0); }
+  const custShare = topShare(Object.values(custAgg));
+  const prodShare = topShare(Object.values(prodAgg));
+  return { custPct: custShare.pct, custTopN: custShare.topN, custTotal: Object.keys(custAgg).length, prodPct: prodShare.pct, prodTopN: prodShare.topN, prodTotal: Object.keys(prodAgg).length };
+}
+
+function renderConcentrationUI(conc) {
+  document.getElementById("concentration-body").innerHTML = `
+    <div class="pareto-row"><span>상위 20% 거래처(${fmtNum(conc.custTopN)}/${fmtNum(conc.custTotal)}곳)가 차지하는 매출 비중</span><span class="pv">${conc.custPct === null ? "-" : conc.custPct.toFixed(0) + "%"}</span></div>
+    <div class="pareto-row"><span>상위 20% 품목(${fmtNum(conc.prodTopN)}/${fmtNum(conc.prodTotal)}개)이 차지하는 매출 비중</span><span class="pv">${conc.prodPct === null ? "-" : conc.prodPct.toFixed(0) + "%"}</span></div>
+  `;
+}
+
+function renderWarehouseBreakdown(ctx) {
+  const agg = {};
+  for (const r of ctx.salesRowsP) {
+    const wh = r.warehouse && r.warehouse.trim() ? r.warehouse.trim() : "미지정";
+    agg[wh] = (agg[wh] || 0) + (Number(r.supply_amount) || 0);
+  }
+  const list = Object.entries(agg).map(([name, v]) => ({ name, v })).sort((a, b) => b.v - a.v).slice(0, 8);
+  const total = list.reduce((a, x) => a + x.v, 0);
+  const mx = list.length ? list[0].v : 1;
+  document.getElementById("warehouse-body").innerHTML = list.length
+    ? list.map((x) => `
+      <div class="rank-item" style="cursor:default">
+        <div class="rank-row"><span class="rn">${esc(x.name)} <span class="mut">${total ? (x.v / total * 100).toFixed(0) : 0}%</span></span><span class="rv">${fmtWon(x.v)}</span></div>
+        <div class="rank-bar"><i style="width:${(x.v / mx * 100).toFixed(1)}%;background:#0891b2"></i></div>
+      </div>`).join("")
+    : '<div class="empty-state">데이터가 없습니다.</div>';
+}
+
+function renderTopCustomers(ctx) {
+  const agg = {};
+  for (const r of ctx.salesRowsP) {
+    if (!r.customer_code) continue;
+    if (!agg[r.customer_code]) agg[r.customer_code] = { code: r.customer_code, name: r.customer_name, v: 0 };
+    agg[r.customer_code].v += Number(r.supply_amount) || 0;
+  }
+  const top = Object.values(agg).sort((a, b) => b.v - a.v).slice(0, 10);
+  document.getElementById("top-customers").innerHTML = rankListHtml(top, "#0891b2", (r) => `customers.html?code=${encodeURIComponent(r.code || "")}`);
+}
+
+let matrixChart = null;
+function renderMatrixChart(ctx) {
+  const custCur = {}, custPrev = {};
+  for (const r of ctx.salesRowsP) { if (!r.customer_code) continue; if (!custCur[r.customer_code]) custCur[r.customer_code] = { name: r.customer_name, v: 0 }; custCur[r.customer_code].v += Number(r.supply_amount) || 0; }
+  for (const r of ctx.salesRowsPrevP) { if (!r.customer_code) continue; if (!custPrev[r.customer_code]) custPrev[r.customer_code] = 0; custPrev[r.customer_code] += Number(r.supply_amount) || 0; }
+
+  const points = Object.keys(custCur)
+    .filter((k) => custPrev[k] > 0)
+    .map((k) => ({ code: k, name: custCur[k].name, x: custCur[k].v, prev: custPrev[k], y: (custCur[k].v / custPrev[k] - 1) * 100 }))
+    .sort((a, b) => b.x - a.x)
+    .slice(0, 60);
+
+  if (matrixChart) { matrixChart.destroy(); matrixChart = null; }
+  const emptyEl = document.getElementById("matrix-empty");
+  if (!points.length) {
+    document.getElementById("matrix-chart").style.display = "none";
+    if (!emptyEl) {
+      const div = document.createElement("div");
+      div.id = "matrix-empty";
+      div.className = "empty-state";
+      div.textContent = "전년 동기 데이터와 함께 비교 가능한 거래처가 없습니다.";
+      document.getElementById("matrix-chart").insertAdjacentElement("afterend", div);
+    }
+    return;
+  }
+  document.getElementById("matrix-chart").style.display = "";
+  if (emptyEl) emptyEl.remove();
+
+  const maxX = Math.max(...points.map((p) => p.x));
+  const medX = points.slice().sort((a, b) => a.x - b.x)[Math.floor(points.length / 2)].x;
+  const colorOf = (p) => (p.y >= 0 ? (p.x >= medX ? "#2563eb" : "#93c5fd") : (p.x >= medX ? "#d97706" : "#cbd5e1"));
+  const radiusOf = (p) => 4 + Math.sqrt(p.x / maxX) * 20;
+
+  matrixChart = new Chart(document.getElementById("matrix-chart"), {
+    type: "bubble",
+    data: { datasets: [{ data: points.map((p) => ({ x: p.x, y: p.y, r: radiusOf(p), code: p.code, name: p.name, prev: p.prev, cur: p.x })), backgroundColor: points.map((p) => colorOf(p) + "cc"), borderColor: points.map((p) => colorOf(p)) }] },
+    options: {
+      maintainAspectRatio: false,
+      scales: {
+        x: { type: "logarithmic", title: { display: true, text: "선택 기간 매출액(로그축)" }, ticks: { callback: (v) => fmtWon(v) } },
+        y: { title: { display: true, text: "전년대비 성장률(%)" }, ticks: { callback: (v) => v + "%" } },
+      },
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: { label: (c) => { const d = c.raw; return `${d.name}: ${fmtWon(d.cur)} (전년 ${fmtWon(d.prev)}, ${d.y >= 0 ? "▲" : "▼"}${Math.abs(d.y).toFixed(0)}%)`; } } },
+      },
+      onClick: (evt, els) => { if (!els.length) return; const d = points[els[0].index]; location.href = `customers.html?code=${encodeURIComponent(d.code)}`; },
+    },
+  });
+}
+
+function renderMovers(p, prevP) {
+  function sumByProduct(list) {
+    const agg = {};
+    for (const r of list) {
+      const key = r.product_code;
+      if (!key) continue;
+      if (!agg[key]) agg[key] = { code: key, name: r.product_name, sales: 0 };
+      agg[key].sales += Number(r.sales_amount) || 0;
+    }
+    return agg;
+  }
+  const cur = sumByProduct(ALL_PROFIT.filter((r) => inPeriod(r.profit_date, p)));
+  const prev = sumByProduct(ALL_PROFIT.filter((r) => inPeriod(r.profit_date, prevP)));
+  // 규모 있는 품목만(노이즈 방지): 전체 매출의 상위 80%를 구성하는 품목 중 전년 매출이 있는 것
+  const movers = Object.keys(cur)
+    .filter((k) => prev[k] && prev[k].sales >= 500000)
+    .map((k) => ({ name: cur[k].name, code: k, cur: cur[k].sales, prev: prev[k].sales, pct: (cur[k].sales / prev[k].sales - 1) * 100 }));
+
+  const up = movers.filter((m) => m.pct > 0).sort((a, b) => b.pct - a.pct).slice(0, 5);
+  const down = movers.filter((m) => m.pct < 0).sort((a, b) => a.pct - b.pct).slice(0, 5);
+
+  const row = (m, cls) => `
+    <a href="products.html?code=${encodeURIComponent(m.code)}" style="text-decoration:none;color:inherit">
+      <div class="act-item"><span><span class="nm">${esc(m.name)}</span><div class="sub">${fmtWon(m.prev)} → ${fmtWon(m.cur)}</div></span><span class="val ${cls}">${m.pct >= 0 ? "▲" : "▼"}${Math.abs(m.pct).toFixed(0)}%</span></div>
+    </a>`;
+  document.getElementById("movers-up").innerHTML = up.length ? up.map((m) => row(m, "")).join("") : '<div class="empty-state">해당 품목이 없습니다.</div>';
+  document.getElementById("movers-down").innerHTML = down.length ? down.map((m) => row(m, "rd")).join("") : '<div class="empty-state">해당 품목이 없습니다.</div>';
+  return { up, down };
+}
+
+function quarterAgg(year) {
+  const qs = [0, 0, 0, 0].map(() => ({ sales: 0, qty: 0, profit: 0 }));
+  for (const r of ALL_PROFIT) {
+    const d = new Date(r.profit_date);
+    if (d.getFullYear() !== year) continue;
+    const qi = Math.floor(d.getMonth() / 3);
+    qs[qi].sales += Number(r.sales_amount) || 0;
+    qs[qi].qty += Number(r.qty) || 0;
+    qs[qi].profit += Number(r.profit_amount) || 0;
+  }
+  return qs;
+}
+
+function renderQuarterTable() {
+  const p = PERIOD.get();
+  const curYear = p.ey, prevYear = p.ey - 1;
+  const cur = quarterAgg(curYear), prev = quarterAgg(prevYear);
+  document.getElementById("qtr-years").textContent = `${prevYear}년 vs ${curYear}년 · 매출액 기준`;
+
+  const pct = (c, pv) => (pv ? (c / pv - 1) * 100 : null);
+  const chgCell = (c, pv) => { const v = pct(c, pv); if (v === null) return '<td class="mut">-</td>'; return `<td class="chg ${v >= 0 ? "up" : "down"}">${v >= 0 ? "▲" : "▼"}${Math.abs(v).toFixed(0)}%</td>`; };
+
+  let body = "";
+  for (let i = 0; i < 4; i++) {
+    body += `<tr><td class="l">${i + 1}분기</td><td>${fmtWon(prev[i].sales)}</td><td>${fmtWon(cur[i].sales)}</td>${chgCell(cur[i].sales, prev[i].sales)}<td>${fmtNum(prev[i].qty)}</td><td>${fmtNum(cur[i].qty)}</td>${chgCell(cur[i].qty, prev[i].qty)}</tr>`;
+  }
+  const totPrev = prev.reduce((a, q) => a + q.sales, 0), totCur = cur.reduce((a, q) => a + q.sales, 0);
+  const totPrevQty = prev.reduce((a, q) => a + q.qty, 0), totCurQty = cur.reduce((a, q) => a + q.qty, 0);
+  body += `<tr class="tot"><td class="l">합계</td><td>${fmtWon(totPrev)}</td><td>${fmtWon(totCur)}</td>${chgCell(totCur, totPrev)}<td>${fmtNum(totPrevQty)}</td><td>${fmtNum(totCurQty)}</td>${chgCell(totCurQty, totPrevQty)}</tr>`;
+
+  document.getElementById("qtr-table").innerHTML = `
+    <thead><tr><th class="l">분기</th><th>${prevYear} 매출</th><th>${curYear} 매출</th><th>증감</th><th>${prevYear} 수량</th><th>${curYear} 수량</th><th>증감</th></tr></thead>
+    <tbody>${body}</tbody>`;
 }
 
 function openRankModal(kind) {
@@ -120,19 +406,19 @@ function openRankModal(kind) {
     byProduct[key].qty += Number(r.qty) || 0;
   }
   let list = Object.values(byProduct);
-  const titleMap = { sales: "매출액 TOP 20", profit: "매출총이익 TOP 20", rate: "이익률 낮은 품목 TOP 20" };
+  const titleMap = { sales: "매출액 TOP 20", qty: "판매수량 TOP 20", profit: "매출총이익 TOP 20", rate: "이익률 낮은 품목 TOP 20" };
   if (kind === "sales") list.sort((a, b) => b.sales - a.sales);
+  else if (kind === "qty") list.sort((a, b) => b.qty - a.qty);
   else if (kind === "profit") list.sort((a, b) => b.profit - a.profit);
   else list = list.filter((x) => x.sales > 0).sort((a, b) => (a.profit / a.sales) - (b.profit / b.sales));
   list = list.slice(0, 20);
 
-  const totSales = list.reduce((a, x) => a + x.sales, 0);
   const rowsHtml = list.map((x, i) => {
     const rate = x.sales ? (x.profit / x.sales) * 100 : 0;
-    return `<tr class="clk" onclick="location.href='products.html?code=${encodeURIComponent(x.code || "")}'"><td class="rk">${i + 1}</td><td class="l nm">${esc(x.name)}</td><td class="l tx2">${esc(x.spec || "-")}</td><td>${fmtNum(x.sales)}</td><td>${fmtNum(x.profit)}</td><td class="${rate < 0 ? "mut" : ""}">${fmtPct(rate)}</td></tr>`;
+    return `<tr class="clk" onclick="location.href='products.html?code=${encodeURIComponent(x.code || "")}'"><td class="rk">${i + 1}</td><td class="l nm">${esc(x.name)}</td><td class="l tx2">${esc(x.spec || "-")}</td><td>${fmtNum(x.qty)}</td><td>${fmtNum(x.sales)}</td><td>${fmtNum(x.profit)}</td><td class="${rate < 0 ? "mut" : ""}">${fmtPct(rate)}</td></tr>`;
   }).join("");
   openModal(`<i class="bi bi-trophy"></i> ${titleMap[kind]} <span style="font-size:12px;color:var(--mut);font-weight:500">${p.sy}.${String(p.sm).padStart(2,"0")}~${p.ey}.${String(p.em).padStart(2,"0")}</span>`,
-    `<div class="table-wrap"><table class="wt-tbl"><thead><tr><th></th><th class="l">품목명</th><th class="l">규격</th><th>매출액</th><th>매출총이익</th><th>이익률</th></tr></thead><tbody>${rowsHtml || '<tr><td colspan="6" class="empty-state">데이터가 없습니다.</td></tr>'}</tbody></table></div>`, true);
+    `<div class="table-wrap"><table class="wt-tbl"><thead><tr><th></th><th class="l">품목명</th><th class="l">규격</th><th>수량</th><th>매출액</th><th>매출총이익</th><th>이익률</th></tr></thead><tbody>${rowsHtml || '<tr><td colspan="7" class="empty-state">데이터가 없습니다.</td></tr>'}</tbody></table></div>`, true);
 }
 
 function renderTopProducts(rows) {
@@ -146,6 +432,10 @@ function renderTopProducts(rows) {
   document.getElementById("top-products").innerHTML = rankListHtml(top, "#2563eb", (r) => `products.html?code=${encodeURIComponent(r.code || "")}`);
 }
 
+function monthSum(y, m, field) {
+  return ALL_PROFIT.filter((r) => toKey(r.profit_date) === y * 100 + m).reduce((a, r) => a + (Number(r[field]) || 0), 0);
+}
+
 let trendChart = null;
 function renderTrendChart() {
   const p = PERIOD.get();
@@ -154,8 +444,9 @@ function renderTrendChart() {
     if (m > 12) { m = 1; y++; }
     months.push({ y, m });
   }
-  const salesArr = months.map(({ y, m }) => ALL_PROFIT.filter((r) => { const k = toKey(r.profit_date); return k === y * 100 + m; }).reduce((a, r) => a + (Number(r.sales_amount) || 0), 0));
-  const profitArr = months.map(({ y, m }) => ALL_PROFIT.filter((r) => { const k = toKey(r.profit_date); return k === y * 100 + m; }).reduce((a, r) => a + (Number(r.profit_amount) || 0), 0));
+  const salesArr = months.map(({ y, m }) => monthSum(y, m, "sales_amount"));
+  const profitArr = months.map(({ y, m }) => monthSum(y, m, "profit_amount"));
+  const prevYearArr = months.map(({ y, m }) => monthSum(y - 1, m, "sales_amount"));
   const labels = months.map(({ y, m }) => `${String(y).slice(2)}.${String(m).padStart(2, "0")}`);
 
   if (trendChart) trendChart.destroy();
@@ -164,8 +455,9 @@ function renderTrendChart() {
     data: {
       labels,
       datasets: [
-        { label: "매출액", data: salesArr, backgroundColor: "#2563eb", order: 2 },
-        { label: "매출총이익", data: profitArr, type: "line", borderColor: "#15803d", backgroundColor: "#15803d", tension: 0.25, order: 1 },
+        { label: "매출액", data: salesArr, backgroundColor: "#2563eb", order: 3 },
+        { label: "매출총이익", data: profitArr, type: "line", borderColor: "#15803d", backgroundColor: "#15803d", tension: 0.25, order: 1, pointRadius: 2 },
+        { label: "전년 동월 매출액", data: prevYearArr, type: "line", borderColor: "#94a3b8", borderDash: [5, 4], backgroundColor: "transparent", tension: 0.25, order: 2, pointRadius: 0, borderWidth: 1.5 },
       ],
     },
     options: {
@@ -183,7 +475,10 @@ function renderTrendChart() {
 function openMonthModal(y, m) {
   const rows = ALL_PROFIT.filter((r) => toKey(r.profit_date) === y * 100 + m);
   const sales = rows.reduce((a, r) => a + (Number(r.sales_amount) || 0), 0);
+  const qty = rows.reduce((a, r) => a + (Number(r.qty) || 0), 0);
   const profit = rows.reduce((a, r) => a + (Number(r.profit_amount) || 0), 0);
+  const prevSales = monthSum(y - 1, m, "sales_amount");
+  const yoy = prevSales ? (sales / prevSales - 1) * 100 : null;
 
   const salesRows = ALL_SALES.filter((r) => toKey(r.sale_date) === y * 100 + m);
   const byCust = {};
@@ -205,7 +500,8 @@ function openMonthModal(y, m) {
 
   const body = `
     <div class="tile-row">
-      <div class="tile"><div class="l">매출액</div><div class="v">${fmtWon(sales)}</div></div>
+      <div class="tile"><div class="l">매출액</div><div class="v">${fmtWon(sales)}</div><div class="s">전년 ${fmtWon(prevSales)} ${yoyBadge(yoy)}</div></div>
+      <div class="tile"><div class="l">판매수량</div><div class="v">${fmtNum(qty)}</div></div>
       <div class="tile"><div class="l">매출총이익</div><div class="v">${fmtWon(profit)}</div></div>
       <div class="tile"><div class="l">이익률</div><div class="v">${sales ? fmtPct(profit / sales * 100) : "-"}</div></div>
     </div>
@@ -216,6 +512,7 @@ function openMonthModal(y, m) {
   openModal(`<i class="bi bi-calendar-check"></i> ${y}년 ${m}월 매출 상세`, body, true);
 }
 
+let CHURN_COUNT = 0, STOCK_COUNT = 0;
 function renderChurnRisk() {
   if (!LATEST_DATE) return;
   const byCust = {};
@@ -231,11 +528,12 @@ function renderChurnRisk() {
   const risky = list
     .map((c) => ({ ...c, idle: daysBetween(LATEST_DATE, c.last) }))
     .filter((c) => c.idle >= 45)
-    .sort((a, b) => b.idle - a.idle)
-    .slice(0, 6);
+    .sort((a, b) => b.idle - a.idle);
+  CHURN_COUNT = risky.length;
+  const risky6 = risky.slice(0, 6);
 
-  document.getElementById("act-churn").innerHTML = risky.length
-    ? risky.map((c, i) => `
+  document.getElementById("act-churn").innerHTML = risky6.length
+    ? risky6.map((c, i) => `
       <a href="customers.html?code=${encodeURIComponent(c.code)}" style="text-decoration:none;color:inherit">
         <li class="act-item"><span class="rk">${i + 1}</span><span><span class="nm">${esc(c.name)}</span><div class="sub">누적 ${fmtWon(c.total)}</div></span><span class="val rd">${c.idle}일째</span></li>
       </a>`).join("")
@@ -260,11 +558,12 @@ function renderStockAlert() {
       return { code: inv.product_code, name: inv.product_name, qty: inv.qty, daysLeft };
     })
     .filter((x) => x.daysLeft !== null && x.daysLeft < 14 && x.qty > 0)
-    .sort((a, b) => a.daysLeft - b.daysLeft)
-    .slice(0, 6);
+    .sort((a, b) => a.daysLeft - b.daysLeft);
+  STOCK_COUNT = alerts.length;
+  const alerts6 = alerts.slice(0, 6);
 
-  document.getElementById("act-stock").innerHTML = alerts.length
-    ? alerts.map((x, i) => `
+  document.getElementById("act-stock").innerHTML = alerts6.length
+    ? alerts6.map((x, i) => `
       <a href="inventory.html?code=${encodeURIComponent(x.code)}" style="text-decoration:none;color:inherit">
         <li class="act-item"><span class="rk">${i + 1}</span><span><span class="nm">${esc(x.name)}</span><div class="sub">재고 ${fmtNum(x.qty)}</div></span><span class="val am">약 ${Math.floor(x.daysLeft)}일분</span></li>
       </a>`).join("")
@@ -310,6 +609,23 @@ function renderMarginAlert() {
     : '<li class="empty-state">전월 대비 이익률이 하락한 품목이 없습니다.</li>';
 }
 
+function renderAll() {
+  const ctx = computeContext();
+  renderKpiBand(ctx);
+  renderTopProducts(ctx.rows);
+  renderTopCustomers(ctx);
+  const movers = renderMovers(ctx.p, ctx.prevP);
+  const custFlow = computeCustFlow(ctx);
+  renderCustFlowUI(custFlow);
+  const conc = computeConcentration(ctx);
+  renderConcentrationUI(conc);
+  renderWarehouseBreakdown(ctx);
+  renderQuarterTable();
+  renderTrendChart();
+  renderMatrixChart(ctx);
+  renderInsights(ctx, movers, custFlow, conc, CHURN_COUNT, STOCK_COUNT);
+}
+
 (async function () {
   const session = await requireAuth("dashboard");
   if (!session) return;
@@ -317,7 +633,7 @@ function renderMarginAlert() {
   const [{ data: latestRows }, profitRows, salesRows, invRows] = await Promise.all([
     sb.from("profit_daily").select("profit_date").order("profit_date", { ascending: false }).limit(1),
     fetchAllRows((from, to) => sb.from("profit_daily").select("profit_date,product_code,product_name,spec,qty,sales_amount,cost_amount,profit_amount").range(from, to)),
-    fetchAllRows((from, to) => sb.from("sales").select("sale_date,customer_code,customer_name,product_code,total_amount").range(from, to)),
+    fetchAllRows((from, to) => sb.from("sales").select("sale_date,customer_code,customer_name,product_code,supply_amount,total_amount,warehouse").range(from, to)),
     sb.from("inventory_snapshots").select("snapshot_date").order("snapshot_date", { ascending: false }).limit(1),
   ]);
 
@@ -337,19 +653,19 @@ function renderMarginAlert() {
     LATEST_INV = inv || [];
   }
 
+  renderChurnRisk();
+  renderStockAlert();
+  renderMarginAlert();
+
   const minYear = Math.min(...ALL_PROFIT.map((r) => new Date(r.profit_date).getFullYear()));
   PERIOD = createPeriodCtrl(document.getElementById("period-host"), {
     minYear,
     maxYear: LATEST_DATE.getFullYear(),
     maxMonth: LATEST_DATE.getMonth() + 1,
-    onChange: () => { renderKpiBand(); renderTrendChart(); },
+    onChange: renderAll,
   });
 
-  renderKpiBand();
-  renderTrendChart();
-  renderChurnRisk();
-  renderStockAlert();
-  renderMarginAlert();
+  renderAll();
 })();
 </script>
 </body>

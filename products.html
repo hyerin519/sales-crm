@@ -23,8 +23,11 @@
   </div>
 
   <div class="wt-tools" id="period-host"></div>
+
+  <div class="kpi-grid" id="kpi-strip"></div>
+
   <div class="wt-tools">
-    <span class="pl" style="font-size:12px;font-weight:600;color:#374151">검색</span>
+    <span class="pl">검색</span>
     <input id="search" placeholder="품목명 또는 코드" style="width:220px" />
     <button id="search-btn" class="primary">검색</button>
   </div>
@@ -34,9 +37,9 @@
       <table class="wt-tbl">
         <thead><tr>
           <th class="rk"></th><th class="l">품목명</th><th class="l">규격</th>
-          <th data-k="qty">출고수량</th><th data-k="sales">매출액</th><th data-k="profit">매출총이익</th><th data-k="rate">이익률</th><th data-k="stock">현재재고</th>
+          <th data-k="qty">출고수량</th><th data-k="sales">매출액</th><th data-k="yoy">전년比</th><th data-k="profit">매출총이익</th><th data-k="rate">이익률</th><th data-k="stock">현재재고</th>
         </tr></thead>
-        <tbody id="prod-body"><tr><td colspan="8" class="empty-state">불러오는 중...</td></tr></tbody>
+        <tbody id="prod-body"><tr><td colspan="9" class="empty-state">불러오는 중...</td></tr></tbody>
       </table>
     </div>
   </div>
@@ -54,9 +57,7 @@ let keyword = "";
 function toKey(dateStr) { const d = new Date(dateStr); return d.getFullYear() * 100 + (d.getMonth() + 1); }
 function inPeriod(dateStr, p) { if (!dateStr) return false; const k = toKey(dateStr); return k >= p.sy * 100 + p.sm && k <= p.ey * 100 + p.em; }
 
-function computeRows() {
-  const p = PERIOD.get();
-  const rows = ALL_PROFIT.filter((r) => inPeriod(r.profit_date, p));
+function aggByProduct(rows) {
   const agg = {};
   for (const r of rows) {
     const key = r.product_code;
@@ -66,18 +67,47 @@ function computeRows() {
     agg[key].sales += Number(r.sales_amount) || 0;
     agg[key].profit += Number(r.profit_amount) || 0;
   }
-  let list = Object.values(agg).map((x) => ({ ...x, rate: x.sales ? (x.profit / x.sales) * 100 : 0, stock: LATEST_INV_MAP[x.code] || 0 }));
+  return agg;
+}
+
+function computeRows() {
+  const p = PERIOD.get();
+  const prevP = { sy: p.sy - 1, sm: p.sm, ey: p.ey - 1, em: p.em };
+  const rows = ALL_PROFIT.filter((r) => inPeriod(r.profit_date, p));
+  const prevRows = ALL_PROFIT.filter((r) => inPeriod(r.profit_date, prevP));
+  const agg = aggByProduct(rows);
+  const prevAgg = aggByProduct(prevRows);
+
+  let list = Object.values(agg).map((x) => {
+    const prevSales = prevAgg[x.code] ? prevAgg[x.code].sales : 0;
+    return { ...x, rate: x.sales ? (x.profit / x.sales) * 100 : 0, stock: LATEST_INV_MAP[x.code] || 0, prevSales, yoy: prevSales ? (x.sales / prevSales - 1) * 100 : null };
+  });
   if (keyword) {
     const kw = keyword.toLowerCase();
     list = list.filter((x) => (x.name || "").toLowerCase().includes(kw) || (x.code || "").toLowerCase().includes(kw));
   }
-  list.sort((a, b) => (a[SORT_KEY] - b[SORT_KEY]) * SORT_DIR);
+  list.sort((a, b) => {
+    if (SORT_KEY === "yoy") return SORT_DIR * ((a.yoy === null ? -Infinity : a.yoy) - (b.yoy === null ? -Infinity : b.yoy));
+    return SORT_DIR * ((a[SORT_KEY] || 0) - (b[SORT_KEY] || 0));
+  });
   return list;
 }
 
 function render() {
   const list = computeRows();
   document.getElementById("count-label").textContent = `${list.length}개 품목`;
+
+  const totalSales = list.reduce((a, x) => a + x.sales, 0);
+  const totalProfit = list.reduce((a, x) => a + x.profit, 0);
+  const totalStock = list.reduce((a, x) => a + x.stock, 0);
+  const negCount = list.filter((x) => x.sales > 0 && x.rate < 0).length;
+  document.getElementById("kpi-strip").innerHTML = `
+    <div class="kpi-card"><div class="label">취급 품목 수</div><div class="value">${fmtNum(list.length)}</div></div>
+    <div class="kpi-card"><div class="label">평균 이익률 (가중)</div><div class="value">${totalSales ? fmtPct(totalProfit / totalSales * 100) : "-"}</div></div>
+    <div class="kpi-card"><div class="label">현재 재고 총수량</div><div class="value">${fmtNum(totalStock)}</div></div>
+    <div class="kpi-card"><div class="label">적자 판매 품목</div><div class="value ${negCount ? "neg" : ""}">${fmtNum(negCount)}</div></div>
+  `;
+
   document.getElementById("prod-body").innerHTML = list.length
     ? list.map((x, i) => `
       <tr class="clk" onclick="openDetail('${esc(x.code)}')">
@@ -86,11 +116,12 @@ function render() {
         <td class="l tx2">${esc(x.spec || "-")}</td>
         <td>${fmtNum(x.qty)}</td>
         <td>${fmtNum(x.sales)}</td>
+        <td>${x.yoy === null ? '<span class="mut">-</span>' : yoyBadge(x.yoy)}</td>
         <td>${fmtNum(x.profit)}</td>
-        <td class="${x.rate < 0 ? "mut" : ""}">${fmtPct(x.rate)}</td>
+        <td class="${x.rate < 0 ? "neg" : ""}" style="${x.rate < 0 ? "color:var(--red);font-weight:700" : ""}">${fmtPct(x.rate)}</td>
         <td>${fmtNum(x.stock)}</td>
       </tr>`).join("")
-    : '<tr><td colspan="8" class="empty-state">조건에 맞는 품목이 없습니다.</td></tr>';
+    : '<tr><td colspan="9" class="empty-state">조건에 맞는 품목이 없습니다.</td></tr>';
 }
 
 document.querySelectorAll("th[data-k]").forEach((th) => {

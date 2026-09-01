@@ -112,7 +112,7 @@ function render() {
     ? list.map((x, i) => `
       <tr class="clk" onclick="openDetail('${esc(x.code)}')">
         <td class="rk">${i + 1}</td>
-        <td class="l nm">${esc(x.name)}</td>
+        <td class="l nm">${esc(x.name)} <span class="mut" style="font-size:10.5px;font-weight:500">${esc(x.code)}</span></td>
         <td class="l tx2">${esc(x.spec || "-")}</td>
         <td>${fmtNum(x.qty)}</td>
         <td>${fmtNum(x.avgPrice)}</td>
@@ -186,7 +186,7 @@ async function openDetail(code) {
       <tbody>${priceRows.map((c) => `<tr><td class="l nm">${esc(c.name)}</td><td>${fmtNum(c.qty)}</td><td style="${c.avgPrice === priceMax && priceMax !== priceMin ? "color:var(--red);font-weight:700" : c.avgPrice === priceMin && priceMax !== priceMin ? "color:var(--green);font-weight:700" : ""}">${fmtNum(c.avgPrice)}</td><td>${fmtNum(c.lastPrice)}</td><td class="l">${c.last}</td></tr>`).join("") || '<tr><td colspan="5" class="empty-state">거래 내역이 없습니다.</td></tr>'}</tbody>
     </table></div>
   `;
-  openModal(`<i class="bi bi-box-seam"></i> ${esc(name)} <span style="font-size:12px;color:var(--mut);font-weight:500">${esc(spec || "")}</span>`, body, true);
+  openModal(`<i class="bi bi-box-seam"></i> ${esc(name)} <span style="font-size:12px;color:var(--mut);font-weight:500">${esc(code)} · ${esc(spec || "")}</span>`, body, true);
 
   if (detailChart) detailChart.destroy();
   detailChart = new Chart(document.getElementById("prod-trend-chart"), {

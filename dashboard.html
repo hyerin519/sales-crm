@@ -190,11 +190,11 @@ function renderInsights(ctx, movers, custFlow, conc, churnCount, stockCount) {
   }
   if (movers.up.length) {
     const m = movers.up[0];
-    items.push({ dot: "up", html: `<b>${esc(m.name)}</b>이(가) 전년 동기 대비 <b>▲${m.pct.toFixed(0)}%</b> 성장해 가장 크게 성장한 품목입니다 (${fmtWon(m.prev)} → ${fmtWon(m.cur)}).` });
+    items.push({ dot: "up", html: `<b>${esc(m.name)}</b> <span class="mut">(${esc(m.code)})</span>이(가) 전년 동기 대비 <b>▲${m.pct.toFixed(0)}%</b> 성장해 가장 크게 성장한 품목입니다 (${fmtWon(m.prev)} → ${fmtWon(m.cur)}).` });
   }
   if (movers.down.length) {
     const m = movers.down[0];
-    items.push({ dot: "down", html: `<b>${esc(m.name)}</b>은(는) 전년 동기 대비 <b>▼${Math.abs(m.pct).toFixed(0)}%</b> 감소해 가장 크게 하락한 품목입니다 (${fmtWon(m.prev)} → ${fmtWon(m.cur)}).` });
+    items.push({ dot: "down", html: `<b>${esc(m.name)}</b> <span class="mut">(${esc(m.code)})</span>은(는) 전년 동기 대비 <b>▼${Math.abs(m.pct).toFixed(0)}%</b> 감소해 가장 크게 하락한 품목입니다 (${fmtWon(m.prev)} → ${fmtWon(m.cur)}).` });
   }
   items.push({ dot: custFlow.new >= custFlow.churned ? "up" : "warn", html: `이번 기간 <b>신규 거래처 ${custFlow.new}곳</b>, <b>이탈 거래처 ${custFlow.churned}곳</b>이 발생했고, <b>${custFlow.retained}곳</b>은 계속 거래 중입니다.` });
   if (conc.custPct !== null) {
@@ -356,7 +356,7 @@ function renderMovers(p, prevP) {
 
   const row = (m, cls) => `
     <a href="products.html?code=${encodeURIComponent(m.code)}" style="text-decoration:none;color:inherit">
-      <div class="act-item"><span><span class="nm">${esc(m.name)}</span><div class="sub">${fmtWon(m.prev)} → ${fmtWon(m.cur)}</div></span><span class="val ${cls}">${m.pct >= 0 ? "▲" : "▼"}${Math.abs(m.pct).toFixed(0)}%</span></div>
+      <div class="act-item"><span><span class="nm">${esc(m.name)} <span class="mut" style="font-weight:500">${esc(m.code)}</span></span><div class="sub">${fmtWon(m.prev)} → ${fmtWon(m.cur)}</div></span><span class="val ${cls}">${m.pct >= 0 ? "▲" : "▼"}${Math.abs(m.pct).toFixed(0)}%</span></div>
     </a>`;
   document.getElementById("movers-up").innerHTML = up.length ? up.map((m) => row(m, "")).join("") : '<div class="empty-state">해당 품목이 없습니다.</div>';
   document.getElementById("movers-down").innerHTML = down.length ? down.map((m) => row(m, "rd")).join("") : '<div class="empty-state">해당 품목이 없습니다.</div>';
@@ -380,19 +380,33 @@ function renderQuarterTable() {
   const p = PERIOD.get();
   const curYear = p.ey, prevYear = p.ey - 1;
   const cur = quarterAgg(curYear), prev = quarterAgg(prevYear);
-  document.getElementById("qtr-years").textContent = `${prevYear}년 vs ${curYear}년 · 매출액 기준`;
+  // curYear가 데이터상 최신 연도면, 아직 안 지난/일부만 지난 분기가 있을 수 있다.
+  // 이걸 그대로 "0원 · ▼100%"로 비교하면 마치 매출이 완전히 끊긴 것처럼 보이는 왜곡이 생긴다.
+  const curMaxMonth = curYear === LATEST_DATE.getFullYear() ? LATEST_DATE.getMonth() + 1 : 12;
 
   const pct = (c, pv) => (pv ? (c / pv - 1) * 100 : null);
   const chgCell = (c, pv) => { const v = pct(c, pv); if (v === null) return '<td class="mut">-</td>'; return `<td class="chg ${v >= 0 ? "up" : "down"}">${v >= 0 ? "▲" : "▼"}${Math.abs(v).toFixed(0)}%</td>`; };
 
   let body = "";
+  let hasPartial = false;
+  let totPrevSales = 0, totCurSales = 0, totPrevQty = 0, totCurQty = 0;
   for (let i = 0; i < 4; i++) {
-    body += `<tr><td class="l">${i + 1}분기</td><td>${fmtWon(prev[i].sales)}</td><td>${fmtWon(cur[i].sales)}</td>${chgCell(cur[i].sales, prev[i].sales)}<td>${fmtNum(prev[i].qty)}</td><td>${fmtNum(cur[i].qty)}</td>${chgCell(cur[i].qty, prev[i].qty)}</tr>`;
+    const qStartMonth = i * 3 + 1, qEndMonth = i * 3 + 3;
+    const notStarted = curMaxMonth < qStartMonth;
+    const partial = !notStarted && curMaxMonth < qEndMonth;
+    if (notStarted) {
+      body += `<tr><td class="l">${i + 1}분기</td><td>${fmtWon(prev[i].sales)}</td><td class="mut">시작 전</td><td class="mut">-</td><td>${fmtNum(prev[i].qty)}</td><td class="mut">-</td><td class="mut">-</td></tr>`;
+      continue;
+    }
+    if (partial) hasPartial = true;
+    totPrevSales += prev[i].sales; totCurSales += cur[i].sales;
+    totPrevQty += prev[i].qty; totCurQty += cur[i].qty;
+    const label = partial ? ` <span class="mut" style="font-weight:500;font-size:10.5px">(진행중)</span>` : "";
+    body += `<tr><td class="l">${i + 1}분기${label}</td><td>${fmtWon(prev[i].sales)}</td><td>${fmtWon(cur[i].sales)}</td>${partial ? '<td class="mut">-</td>' : chgCell(cur[i].sales, prev[i].sales)}<td>${fmtNum(prev[i].qty)}</td><td>${fmtNum(cur[i].qty)}</td>${partial ? '<td class="mut">-</td>' : chgCell(cur[i].qty, prev[i].qty)}</tr>`;
   }
-  const totPrev = prev.reduce((a, q) => a + q.sales, 0), totCur = cur.reduce((a, q) => a + q.sales, 0);
-  const totPrevQty = prev.reduce((a, q) => a + q.qty, 0), totCurQty = cur.reduce((a, q) => a + q.qty, 0);
-  body += `<tr class="tot"><td class="l">합계</td><td>${fmtWon(totPrev)}</td><td>${fmtWon(totCur)}</td>${chgCell(totCur, totPrev)}<td>${fmtNum(totPrevQty)}</td><td>${fmtNum(totCurQty)}</td>${chgCell(totCurQty, totPrevQty)}</tr>`;
+  body += `<tr class="tot"><td class="l">합계</td><td>${fmtWon(totPrevSales)}</td><td>${fmtWon(totCurSales)}</td>${chgCell(totCurSales, totPrevSales)}<td>${fmtNum(totPrevQty)}</td><td>${fmtNum(totCurQty)}</td>${chgCell(totCurQty, totPrevQty)}</tr>`;
 
+  document.getElementById("qtr-years").textContent = `${prevYear}년 vs ${curYear}년 · 매출액 기준${hasPartial ? " · 합계는 아직 시작 전인 분기를 제외하고 비교 가능한 기간만 집계" : ""}`;
   document.getElementById("qtr-table").innerHTML = `
     <thead><tr><th class="l">분기</th><th>${prevYear} 매출</th><th>${curYear} 매출</th><th>증감</th><th>${prevYear} 수량</th><th>${curYear} 수량</th><th>증감</th></tr></thead>
     <tbody>${body}</tbody>`;
@@ -420,7 +434,7 @@ function openRankModal(kind) {
 
   const rowsHtml = list.map((x, i) => {
     const rate = x.sales ? (x.profit / x.sales) * 100 : 0;
-    return `<tr class="clk" onclick="location.href='products.html?code=${encodeURIComponent(x.code || "")}'"><td class="rk">${i + 1}</td><td class="l nm">${esc(x.name)}</td><td class="l tx2">${esc(x.spec || "-")}</td><td>${fmtNum(x.qty)}</td><td>${fmtNum(x.sales)}</td><td>${fmtNum(x.profit)}</td><td class="${rate < 0 ? "mut" : ""}">${fmtPct(rate)}</td></tr>`;
+    return `<tr class="clk" onclick="location.href='products.html?code=${encodeURIComponent(x.code || "")}'"><td class="rk">${i + 1}</td><td class="l nm">${esc(x.name)} <span class="mut" style="font-size:10.5px;font-weight:500">${esc(x.code || "")}</span></td><td class="l tx2">${esc(x.spec || "-")}</td><td>${fmtNum(x.qty)}</td><td>${fmtNum(x.sales)}</td><td>${fmtNum(x.profit)}</td><td class="${rate < 0 ? "mut" : ""}">${fmtPct(rate)}</td></tr>`;
   }).join("");
   openModal(`<i class="bi bi-trophy"></i> ${titleMap[kind]} <span style="font-size:12px;color:var(--mut);font-weight:500">${p.sy}.${String(p.sm).padStart(2,"0")}~${p.ey}.${String(p.em).padStart(2,"0")}</span>`,
     `<div class="table-wrap"><table class="wt-tbl"><thead><tr><th></th><th class="l">품목명</th><th class="l">규격</th><th>수량</th><th>매출액</th><th>매출총이익</th><th>이익률</th></tr></thead><tbody>${rowsHtml || '<tr><td colspan="7" class="empty-state">데이터가 없습니다.</td></tr>'}</tbody></table></div>`, true);
@@ -430,7 +444,7 @@ function renderTopProducts(rows) {
   const byProduct = {};
   for (const r of rows) {
     const key = r.product_code || r.product_name;
-    if (!byProduct[key]) byProduct[key] = { code: r.product_code, name: r.product_name, spec: r.spec, v: 0 };
+    if (!byProduct[key]) byProduct[key] = { code: r.product_code, name: r.product_name, spec: r.spec, sub: r.product_code, v: 0 };
     byProduct[key].v += Number(r.sales_amount) || 0;
   }
   const top = Object.values(byProduct).sort((a, b) => b.v - a.v).slice(0, 10);
@@ -498,7 +512,7 @@ function openMonthModal(y, m) {
   const byProd = {};
   for (const r of rows) {
     const key = r.product_code || r.product_name;
-    if (!byProd[key]) byProd[key] = { code: r.product_code, name: r.product_name, v: 0 };
+    if (!byProd[key]) byProd[key] = { code: r.product_code, name: r.product_name, sub: r.product_code, v: 0 };
     byProd[key].v += Number(r.sales_amount) || 0;
   }
   const topProd = Object.values(byProd).sort((a, b) => b.v - a.v).slice(0, 8);
@@ -570,7 +584,7 @@ function renderStockAlert() {
   document.getElementById("act-stock").innerHTML = alerts6.length
     ? alerts6.map((x, i) => `
       <a href="inventory.html?code=${encodeURIComponent(x.code)}" style="text-decoration:none;color:inherit">
-        <li class="act-item"><span class="rk">${i + 1}</span><span><span class="nm">${esc(x.name)}</span><div class="sub">재고 ${fmtNum(x.qty)}</div></span><span class="val am">약 ${Math.floor(x.daysLeft)}일분</span></li>
+        <li class="act-item"><span class="rk">${i + 1}</span><span><span class="nm">${esc(x.name)} <span class="mut" style="font-weight:500">${esc(x.code)}</span></span><div class="sub">재고 ${fmtNum(x.qty)}</div></span><span class="val am">약 ${Math.floor(x.daysLeft)}일분</span></li>
       </a>`).join("")
     : '<li class="empty-state">소진 임박 품목이 없습니다.</li>';
 }
@@ -628,7 +642,7 @@ function renderMarginAlert() {
   document.getElementById("act-margin").innerHTML = deltas.length
     ? deltas.map((x, i) => `
       <a href="products.html?code=${encodeURIComponent(x.code)}" style="text-decoration:none;color:inherit">
-        <li class="act-item"><span class="rk">${i + 1}</span><span><span class="nm">${esc(x.name)}</span><div class="sub">이번달 이익률 ${fmtPct(x.curRate)}</div></span><span class="val rd">${x.delta.toFixed(1)}%p</span></li>
+        <li class="act-item"><span class="rk">${i + 1}</span><span><span class="nm">${esc(x.name)} <span class="mut" style="font-weight:500">${esc(x.code)}</span></span><div class="sub">이번달 이익률 ${fmtPct(x.curRate)}</div></span><span class="val rd">${x.delta.toFixed(1)}%p</span></li>
       </a>`).join("")
     : '<li class="empty-state">전월 대비 이익률이 하락한 품목이 없습니다.</li>';
 }

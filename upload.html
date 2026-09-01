@@ -169,13 +169,16 @@ document.getElementById("upload-sales-btn").addEventListener("click", async () =
       const saleDate = excelValueToISODate(r[col.date]);
       const docNo = toStr(r[col.docNo]);
       const productCode = toStr(r[col.code]);
-      if (!saleDate || !docNo || !productCode) continue;
+      const productName = toStr(r[col.name]);
+      // 더존 ERP 엑셀은 각 날짜/문서 블록 끝에 "일계"·"합계" 같은 소계 행을 끼워 넣는다.
+      // 소계 행은 품목코드는 있어도 품목명이 항상 비어있으므로 이 조건으로 걸러낸다(안 걸러지면 매출이 2배로 집계됨).
+      if (!saleDate || !docNo || !productCode || !productName) continue;
 
       const record = {
         doc_no: docNo,
         sale_date: saleDate,
         product_code: productCode,
-        product_name: toStr(r[col.name]),
+        product_name: productName,
         spec: toStr(r[col.spec]),
         due_date: excelValueToISODate(r[col.due]),
         qty: toNum(r[col.qty]),
@@ -200,7 +203,7 @@ document.getElementById("upload-sales-btn").addEventListener("click", async () =
         customersMap.set(custCode, { code: custCode, name: toStr(r[col.custName]) || custCode });
       }
       if (productCode && !productsMap.has(productCode)) {
-        productsMap.set(productCode, { code: productCode, name: toStr(r[col.name]) || productCode, spec: toStr(r[col.spec]) });
+        productsMap.set(productCode, { code: productCode, name: productName || productCode, spec: toStr(r[col.spec]) });
       }
     }
 
@@ -247,13 +250,15 @@ document.getElementById("upload-inventory-btn").addEventListener("click", async 
     const records = [];
     for (const r of rows) {
       const productCode = toStr(r[col.code]);
-      if (!productCode) continue;
+      const productName = toStr(r[col.name]);
+      // "합계" 소계 행은 품목코드는 있어도 품목명이 비어있어 걸러야 함(재고 목록에 빈 행으로 안 섞이게)
+      if (!productCode || !productName) continue;
       records.push({
         snapshot_date: snapshotDate,
         supply_type: toStr(r[col.supplyType]),
         account_type: toStr(r[col.accountType]),
         product_code: productCode,
-        product_name: toStr(r[col.name]),
+        product_name: productName,
         spec: toStr(r[col.spec]),
         qty: toNum(r[col.qty]),
         unit_price: toNum(r[col.price]),
@@ -310,12 +315,15 @@ document.getElementById("upload-profit-btn").addEventListener("click", async () 
     for (const r of rows) {
       const profitDate = excelValueToISODate(r[col.date]);
       const productCode = toStr(r[col.code]);
-      if (!profitDate || !productCode) continue;
+      const productName = toStr(r[col.name]);
+      // 이 파일은 날짜별 블록 끝에 "일계"(일일 소계) 행이 끼어 있다. 품목코드는 있어도 품목명이 항상 비어있어서
+      // 이 조건으로 안 걸러내면 하루치 매출이 실제값의 2배로 집계된다(2026-08 백필 데이터에서 실제로 발생했던 사고).
+      if (!profitDate || !productCode || !productName) continue;
       records.push({
         profit_date: profitDate,
         account_type: toStr(r[col.accountType]),
         product_code: productCode,
-        product_name: toStr(r[col.name]),
+        product_name: productName,
         spec: toStr(r[col.spec]),
         qty: toNum(r[col.qty]),
         sales_amount: toNum(r[col.sales]),
